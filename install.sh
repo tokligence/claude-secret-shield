@@ -47,6 +47,15 @@ echo "  -> Downloading patterns..."
 curl -fsSL "$BASE_URL/hooks/patterns.py" -o "$HOOKS_DIR/patterns.py"
 echo "  OK: Installed $HOOKS_DIR/patterns.py"
 
+# Install custom-patterns example (never overwrite user's custom file)
+echo "  -> Downloading custom-patterns example..."
+curl -fsSL "$BASE_URL/hooks/custom-patterns.example.py" -o "$HOOKS_DIR/custom-patterns.example.py"
+echo "  OK: Installed $HOOKS_DIR/custom-patterns.example.py"
+
+if [ -f "$HOOKS_DIR/custom-patterns.py" ]; then
+  echo "  OK: Existing custom-patterns.py preserved (not overwritten)"
+fi
+
 # Remove old bash hook if present
 if [ -f "$HOOKS_DIR/redact-secrets.sh" ]; then
   rm "$HOOKS_DIR/redact-secrets.sh"
@@ -109,8 +118,15 @@ echo "    - Strategy 1: Blocked files (.env, credentials, etc.) are never read"
 echo "    - Strategy 2: Secrets in any file are replaced with {{PLACEHOLDER}} tokens"
 echo "    - Strategy 3: Placeholders are restored to real values when writing files"
 echo ""
-echo "  Customize patterns: edit ~/.claude/hooks/patterns.py"
+echo "  Upstream patterns:  ~/.claude/hooks/patterns.py (updated on each install)"
+echo "  Custom patterns:    ~/.claude/hooks/custom-patterns.py (never overwritten)"
 echo "  Session mappings:   /tmp/.claude-redact-{session_id}.json"
+echo ""
+echo "  To add your own patterns, copy the example file:"
+echo "    cp ~/.claude/hooks/custom-patterns.example.py ~/.claude/hooks/custom-patterns.py"
+echo "  Then edit custom-patterns.py to add your patterns."
+echo ""
+echo "  Re-running install.sh updates upstream patterns without affecting your custom patterns."
 echo ""
 echo "  Restart Claude Code for changes to take effect."
 echo ""

@@ -80,22 +80,40 @@ When Claude Code calls Write, Edit, or Bash tools, the hook intercepts the input
 
 The secret-to-placeholder mapping is stored at `/tmp/.claude-redact-{session_id}.json` with `chmod 600`. Each Claude Code session gets its own mapping file. Mappings are cleaned up on uninstall.
 
-## Customizing Patterns
+## Custom Patterns
 
-Edit `~/.claude/hooks/patterns.py` to:
+You can add your own secret patterns **without modifying upstream files**. Custom patterns survive upgrades because `install.sh` never overwrites your custom file.
 
-- Add files to `BLOCKED_FILES`
-- Add regex patterns to `SECRET_PATTERNS`
-- Remove patterns you don't need
+### Setup
 
-Each pattern is a tuple of `(name, regex_string)`:
+1. Copy the example file:
+   ```bash
+   cp ~/.claude/hooks/custom-patterns.example.py ~/.claude/hooks/custom-patterns.py
+   ```
 
-```python
-SECRET_PATTERNS = [
-    # ... existing patterns ...
-    ("MY_INTERNAL_TOKEN", r'myapp_[a-zA-Z0-9]{32}'),
-]
-```
+2. Edit `~/.claude/hooks/custom-patterns.py` to add your patterns:
+   ```python
+   CUSTOM_SECRET_PATTERNS = [
+       ("MY_INTERNAL_TOKEN", r"mycompany_tok_[A-Za-z0-9]{32,}"),
+       ("INTERNAL_API_KEY", r"int_key_[a-f0-9]{64}"),
+   ]
+
+   CUSTOM_BLOCKED_FILES = [
+       "my-secret-config.yaml",
+       ".internal-credentials",
+   ]
+   ```
+
+### How it works
+
+- `patterns.py` contains upstream patterns and is **updated on each install**
+- `custom-patterns.py` contains your patterns and is **never overwritten**
+- Both are loaded at runtime and merged together
+- Re-running `install.sh` is safe: it updates upstream patterns without affecting your custom ones
+
+### Editing upstream patterns
+
+You can also edit `~/.claude/hooks/patterns.py` directly, but note that re-running `install.sh` will overwrite it. For persistent customizations, always use `custom-patterns.py`.
 
 ## Running Tests
 

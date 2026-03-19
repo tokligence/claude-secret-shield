@@ -71,6 +71,21 @@ if not _patterns_loaded:
         ("GENERIC_SECRET", r'(?i)(?:secret|password|passwd|pwd)["\']?\s*[:=]\s*["\']?[^\s"\']{10,60}["\']?'),
     ]
 
+# ── Load custom patterns (never overwritten by install.sh) ───────────────
+try:
+    import importlib.util
+    custom_path = os.path.join(_SCRIPT_DIR, "custom-patterns.py")
+    if os.path.exists(custom_path):
+        spec = importlib.util.spec_from_file_location("custom_patterns", custom_path)
+        custom_mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(custom_mod)
+        if hasattr(custom_mod, "CUSTOM_SECRET_PATTERNS"):
+            SECRET_PATTERNS.extend(custom_mod.CUSTOM_SECRET_PATTERNS)
+        if hasattr(custom_mod, "CUSTOM_BLOCKED_FILES"):
+            BLOCKED_FILES.extend(custom_mod.CUSTOM_BLOCKED_FILES)
+except Exception:
+    pass
+
 # ── Compile patterns once ────────────────────────────────────────────────
 # This runs once per invocation. Python process startup + compile is ~5-20ms.
 COMPILED_PATTERNS = []
