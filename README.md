@@ -57,7 +57,7 @@ The hook registers for **two** Claude Code hook events:
 |------------|---------|---------|
 | PreToolUse | Read, Write, Edit, Bash | Intercept tool calls before execution |
 | PostToolUse | Read, Write, Edit | Restore/cleanup files after tool completes |
-| Stop | (all) | Clean up sensitive mapping and backup files on exit |
+| SessionEnd | (all) | Clean up sensitive mapping and backup files on exit |
 
 ### Request Processing Flow
 
@@ -101,7 +101,7 @@ Claude Code issues a tool call (Read, Write, Edit, or Bash)
   Edit:  restore placeholders in edited file
   Write: cleanup backup files
 
-  Stop Hook (on session exit)
+  SessionEnd Hook (on session exit)
         |
         v
   Delete /tmp mapping + backup files

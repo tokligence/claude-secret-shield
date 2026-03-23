@@ -88,7 +88,7 @@ POST_HOOK_CONFIG='{
 }'
 
 
-STOP_HOOK_CONFIG='{
+SESSION_END_HOOK_CONFIG='{
   "hooks": [
     {
       "type": "command",
@@ -106,7 +106,7 @@ if [ -f "$SETTINGS_FILE" ]; then
     # Remove any old hook entries, add both PreToolUse and PostToolUse
     UPDATED=$(echo "$EXISTING" | jq \
       --argjson pre_hook "$PRE_HOOK_CONFIG" \
-      --argjson post_hook "$POST_HOOK_CONFIG"       --argjson stop_hook "$STOP_HOOK_CONFIG" '
+      --argjson post_hook "$POST_HOOK_CONFIG"       --argjson stop_hook "$SESSION_END_HOOK_CONFIG" '
       .hooks.PreToolUse = (
         (.hooks.PreToolUse // [])
         | map(select(
@@ -122,13 +122,13 @@ if [ -f "$SETTINGS_FILE" ]; then
           ))
       ) + [$post_hook]
       |
-      .hooks.Stop = [$stop_hook]
+      .hooks.SessionEnd = [$stop_hook]
     ')
   else
     UPDATED=$(echo "$EXISTING" | jq \
       --argjson pre_hook "$PRE_HOOK_CONFIG" \
       --argjson post_hook "$POST_HOOK_CONFIG" '
-      .hooks = { "PreToolUse": [$pre_hook], "PostToolUse": [$post_hook], "Stop": [$stop_hook] }
+      .hooks = { "PreToolUse": [$pre_hook], "PostToolUse": [$post_hook], "SessionEnd": [$stop_hook] }
     ')
   fi
 

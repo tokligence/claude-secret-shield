@@ -351,9 +351,9 @@ if is_post_hook:
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# Stop hook: Clean up sensitive mapping and backup files on session exit
+# SessionEnd / Stop hook: Clean up sensitive mapping and backup files
 # ══════════════════════════════════════════════════════════════════════════
-if input_data.get("type") == "Stop" or tool_name == "Stop":
+if input_data.get("type") in ("SessionEnd", "Stop") or tool_name in ("SessionEnd", "Stop"):
     # Remove the mapping file (contains real secret values)
     try:
         if os.path.exists(MAPPING_FILE):
