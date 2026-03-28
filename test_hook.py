@@ -1211,7 +1211,9 @@ class TestUserPromptSubmit:
         result, code, _ = self._run_prompt_hook("go", cwd=tmp_path, field="user_prompt")
         assert code == 0 and result is not None
         extra = result["hookSpecificOutput"]["additionalContext"]
-        assert "previously blocked request" in extra.lower()
+        assert "continue that same request" in extra.lower()
+        assert "treat those placeholders as the actual values" in extra.lower()
+        assert "do not ask the user to manually substitute" in extra.lower()
+        assert str(tmp_path / ".tmp_secrets.conf") in extra
         assert "帮我配置 git" in extra
         assert "{{EMAIL_" in extra
-        assert str(tmp_path / ".tmp_secrets.conf") in extra

@@ -305,18 +305,19 @@ try:
 
                 additional_context = (
                     "[claude-secret-shield] The user's previous prompt was blocked because it "
-                    "contained secrets. Treat this current message as confirmation to continue "
-                    "the previously blocked request.\n\n"
+                    "contained secrets. This message is confirmation to continue that same request.\n\n"
+                    f"Read {tmp_file} now. That file is safe to read because secrets will be shown "
+                    "to you as redacted placeholders.\n\n"
+                    "Important: treat those placeholders as the actual values for the task. If you "
+                    "need to write files, edit files, or run commands, use the placeholders exactly "
+                    "as they appear. claude-secret-shield will automatically restore the real secret "
+                    "values before execution when appropriate.\n\n"
+                    "Do not ask the user to manually substitute the values or run the command "
+                    "themselves just because the secrets are redacted. Continue the original "
+                    "request normally using the placeholderized values."
                 )
                 if redacted_prompt:
-                    additional_context += (
-                        "Previously blocked prompt (redacted):\n"
-                        f"{redacted_prompt}\n\n"
-                    )
-                additional_context += (
-                    f"Read {tmp_file} to recover the exact placeholderized values, then continue "
-                    "the user's original request. Secrets in that file are auto-redacted for safety."
-                )
+                    additional_context += f"\n\nPreviously blocked prompt (redacted):\n{redacted_prompt}"
                 print(json.dumps({
                     "hookSpecificOutput": {
                         "hookEventName": "UserPromptSubmit",
