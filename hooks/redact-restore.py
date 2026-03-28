@@ -618,13 +618,6 @@ try:
                             os.utime(file_path, (orig_meta["atime"], orig_meta["mtime"]))
                     except OSError:
                         pass
-                    # Auto-delete .tmp_secrets.conf after reading
-                    if os.path.basename(file_path) == ".tmp_secrets.conf":
-                        try:
-                            os.remove(file_path)
-                            debug_log(f"Auto-deleted {file_path} after read")
-                        except OSError:
-                            pass
                 elif tool_name == "Edit":
                     # After Edit: file has edited content with placeholders.
                     # Replace all placeholders with real values.
@@ -646,6 +639,15 @@ try:
                 # For Write: file already has correct content (placeholders
                 # were restored in PreToolUse). Just clean up backup.
                 cleanup_backup(file_path)
+
+            # Auto-delete .tmp_secrets.conf after reading (ephemeral file)
+            if tool_name == "Read" and os.path.basename(file_path) == ".tmp_secrets.conf":
+                try:
+                    if os.path.exists(file_path):
+                        os.remove(file_path)
+                        debug_log(f"Auto-deleted {file_path} after read")
+                except OSError:
+                    pass
         sys.exit(0)
 
 
