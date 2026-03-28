@@ -46,9 +46,9 @@ Four strategies work together to keep your secrets safe:
 ```
 
 **Layer 0 -- Prompt Scanning:** When you paste a secret directly in your prompt,
-the hook detects it and blocks the message before it reaches the API. You'll see
-a guide telling you to save the secret to `.tmp_secrets.conf` instead, where it
-can be safely redacted.
+the hook detects it, saves your full prompt to `.tmp_secrets.conf`, and blocks
+the message. Just type: `read .tmp_secrets.conf and follow the instructions in it`.
+Claude reads the file with secrets auto-redacted, and the file is auto-deleted after reading.
 
 **Layer 1 -- Block List:** Some files should never be read at all. When Claude tries
 to read `.env`, `credentials.json`, `id_rsa`, or any of the 36 blocked file types,
@@ -121,7 +121,7 @@ User submits prompt
         v
   UserPromptSubmit Hook
         |
-  Secret found? ──yes──> BLOCK + show guide to use .tmp_secrets.conf
+  Secret found? ──yes──> auto-save prompt to .tmp_secrets.conf + BLOCK
         |
        no
         v
@@ -394,7 +394,7 @@ python3 test_hook.py
 ## FAQ
 
 **Q: What if I paste an API key directly in my prompt?**
-A: The `UserPromptSubmit` hook detects it and blocks the message. You'll see a guide telling you to save the secret to `.tmp_secrets.conf` first, then tell Claude where the file is. Claude reads the file with secrets auto-redacted.
+A: The hook automatically saves your prompt to `.tmp_secrets.conf` and blocks the message. Just type: `read .tmp_secrets.conf and follow the instructions in it`. Claude reads the file with secrets safely redacted, then the file is auto-deleted. No manual copy-paste needed.
 
 **Q: What is `.tmp_secrets.conf`?**
 A: It's the recommended file for temporarily storing secrets that you want Claude to use. When Claude reads it, secrets are automatically redacted. The file is auto-added to `.gitignore` on first read so it's never committed.

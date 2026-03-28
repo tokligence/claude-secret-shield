@@ -44,7 +44,7 @@
                   (.env等)      {{PLACEHOLDER}}  真实值
 ```
 
-**第 0 层 -- 输入扫描（Prompt Scanning）：** 当你直接在对话中粘贴秘密时，hook 会在消息发送到 API 之前检测并拦截。你会看到一个引导，建议你将秘密保存到 `.tmp_secrets.conf` 文件中，然后告诉 Claude 文件位置。Claude 读取文件时秘密会被自动脱敏。
+**第 0 层 -- 输入扫描（Prompt Scanning）：** 当你直接在对话中粘贴秘密时，hook 会自动将你的完整 prompt 保存到 `.tmp_secrets.conf` 并拦截消息。你只需输入：`read .tmp_secrets.conf and follow the instructions in it`。Claude 读取文件时秘密会被自动脱敏，读取完成后文件自动删除。
 
 **第 1 层 -- 文件拦截（Block List）：** 某些文件不应该被读取。当 Claude 尝试读取 `.env`、`credentials.json`、`id_rsa` 或其他 30 种被拦截的文件类型时，hook 会直接拒绝读取。Claude 会收到一条错误信息，建议使用其他替代方式。
 
