@@ -1,22 +1,57 @@
-# claude-code-redact-restore
+# Claude Code Redact & Restore
 
-Prevent [Claude Code](https://claude.ai/code) from seeing your secrets. Secrets are automatically redacted when files are read, and restored when files are written. One-line install.
+> Protect your secrets when using Claude Code. Automatic detection, redaction, and restoration of API keys, tokens, passwords, and credentials.
 
-## The Problem
+## Features
 
-Claude Code can read files with credentials and private keys in your project. If you are not careful, secrets end up in the conversation context and potentially in logs.
+- **108 secret patterns** -- OpenAI, Anthropic, AWS, GitHub, Stripe, Slack, database URLs, private keys, JWTs, and 90+ more
+- **30 blocked file types** -- `.env`, `credentials.json`, `id_rsa`, `.pem`, `.p12`, `.pfx`, and more
+- **Automatic restore** -- secrets restored to real values when Claude writes code
+- **Global persistent mapping** -- same secret always produces the same placeholder, across sessions
+- **Encrypted at rest** -- mapping file encrypted with Fernet (AES-128-CBC + HMAC-SHA256)
+- **Parallel-safe** -- `fcntl` file locking for concurrent hook invocations
+- **Bash command protection** -- blocks `cat .env`, redacts secrets in command output
+- **Allowlist** -- `.claude-redact-ignore` to skip specific files
+- **Binary file detection** -- skips non-text files automatically
+- **Atomic writes** -- tempfile + rename prevents file corruption on crash
+- **Crash recovery** -- orphaned backups automatically restored on next invocation
+- **Debug mode** -- `REDACT_DEBUG=1` for troubleshooting
+- **45 E2E tests** -- comprehensive test coverage
 
-## The Solution
+## How It Works
 
-A Claude Code hook (Python) that implements three strategies:
+Three strategies work together to keep your secrets safe:
 
-| Strategy | What it does |
-|----------|-------------|
-| **Block list** | Certain files are never read at all |
-| **Smart redact** | Secrets in *any* file are replaced with consistent placeholder tokens before Claude sees them |
-| **Auto restore** | When Claude writes/edits files or runs commands, placeholders are silently restored to real values |
+```
+                        Your Code Files
+                              |
+              +---------------+---------------+
+              |               |               |
+        Layer 1          Layer 2          Layer 3
+       BLOCK IT        REPLACE IT       RESTORE IT
+              |               |               |
+              v               v               v
+     Dangerous files    Secrets in any    Placeholders
+     denied outright    file swapped      swapped back
+     (.env, id_rsa,     with harmless     to real values
+      credentials...)   {{PLACEHOLDER}}   when writing
+```
 
-## Install
+**Layer 1 -- Block List:** Some files should never be read at all. When Claude tries
+to read `.env`, `credentials.json`, `id_rsa`, or any of the 30 blocked file types,
+the hook denies the read entirely. Claude gets an error message suggesting alternatives.
+
+**Layer 2 -- Pattern Redaction:** For every other file, the hook scans the content
+against 108 regex patterns. Any match is replaced with a deterministic placeholder
+like `{{OPENAI_KEY_a1b2c3d4}}`. Claude sees the placeholder, never the real key.
+
+**Layer 3 -- Auto Restore:** When Claude writes or edits a file, the hook
+silently swaps all placeholders back to the real secret values. Your code on disk
+always has real credentials. Claude never knows the difference.
+
+## Quick Start
+
+### Install
 
 ```bash
 curl -sL https://raw.githubusercontent.com/tokligence/claude-code-redact-restore/main/install.sh | sh
@@ -24,9 +59,27 @@ curl -sL https://raw.githubusercontent.com/tokligence/claude-code-redact-restore
 
 Restart Claude Code after installing.
 
-**Prerequisites:** Python 3.6+, jq
+**Prerequisites:** Python 3.6+, `jq`
 
-## Uninstall
+**Optional (recommended):** Install the `cryptography` package for encrypted mapping storage:
+
+```bash
+pip3 install cryptography
+```
+
+Without it, the mapping file is stored as plaintext (still permission-restricted, but not encrypted).
+
+### Verify it works
+
+1. Create a test file with a fake secret:
+   ```bash
+   echo 'OPENAI_API_KEY=sk-proj-EXAMPLE-NOT-A-REAL-KEY-12345678901234' > /tmp/test-secret.txt
+   ```
+2. In Claude Code, ask: "Read /tmp/test-secret.txt"
+3. Claude should see something like: `OPENAI_API_KEY={{OPENAI_KEY_a1b2c3d4}}`
+4. The real file on disk is unchanged (check with `cat /tmp/test-secret.txt`)
+
+### Uninstall
 
 ```bash
 curl -sL https://raw.githubusercontent.com/tokligence/claude-code-redact-restore/main/uninstall.sh | sh
@@ -34,160 +87,279 @@ curl -sL https://raw.githubusercontent.com/tokligence/claude-code-redact-restore
 
 ## Architecture
 
-### System Overview
+### Hook Lifecycle
+
+The hook registers for three Claude Code events:
+
+| Hook Event | Tools Matched | Purpose |
+|------------|---------------|---------|
+| `PreToolUse` | Read, Write, Edit, Bash | Intercept before execution |
+| `PostToolUse` | Read, Write, Edit | Restore/cleanup after execution |
+| `SessionEnd` | (all) | Clean up temporary backup files |
+
+### Request Flow
 
 ```
-~/.claude/
-  settings.json              # Hook registration (PreToolUse + PostToolUse)
-  .redact-mapping.json       # Global secret-to-placeholder mapping (chmod 600)
-  .redact-hmac-key           # HMAC key for deterministic placeholders (chmod 400)
-  hooks/
-    redact-restore.py        # Main hook script (handles both Pre and Post)
-    patterns.py              # 100+ secret regex patterns (upstream, updated on install)
-    custom-patterns.py       # User custom patterns (never overwritten)
-
-/tmp/
-  .claude-backup-{session_id}/   # Temporary file backups during Read
-```
-
-### Hook Registration
-
-The hook registers for **three** Claude Code hook events:
-
-| Hook Event | Matcher | Purpose |
-|------------|---------|---------|
-| PreToolUse | Read, Write, Edit, Bash | Intercept tool calls before execution |
-| PostToolUse | Read, Write, Edit | Restore/cleanup files after tool completes |
-| SessionEnd | (all) | Clean up sensitive mapping and backup files on exit |
-
-### Request Processing Flow
-
-```
-Claude Code issues a tool call (Read, Write, Edit, or Bash)
+Claude Code issues tool call (Read / Write / Edit / Bash)
         |
         v
   PreToolUse Hook
         |
-  +-----+------+------+------+
-  |            |         |         |
-  v            v         v         v
- Read       Write     Edit      Bash
-  |            |         |         |
-  v            v         v         v
- Block       Load      Load     Block
- list?       mapping   mapping  list?
-  |            |         |         |
-  v            v         v         v
- Read file   Restore   Restore  Restore
- Scan for    place-    place-   place-
- secrets     holders   holders  holders
-  |            |         |         |
-  v            v         v         v
- Backup +    allow      allow    allow
- overwrite   with       with     with
- with        update     update   update
- redacted
-  |
-  v
-  allow
+  +-----+--------+--------+--------+
+  |              |          |          |
+  v              v          v          v
+ Read          Write      Edit       Bash
+  |              |          |          |
+  v              v          v          v
+ Blocked?      Load       Load      Blocked?
+ (deny)        mapping    mapping   (deny cmd)
+  |              |          |          |
+  v              v          v          v
+ Scan for      Restore    Re-redact  Restore
+ secrets,      place-     file for   place-
+ backup +      holders    freshness  holders
+ redact        in content check      in cmd
+  |              |          |          |
+  v              v          v          v
+ allow         allow +    allow      allow +
+               update               update
         |
         v
-  Claude Code executes tool (with real values restored)
+  Claude Code executes the tool
         |
         v
-  PostToolUse Hook (Read, Write, Edit)
+  PostToolUse Hook
+        |
+  +-----+--------+--------+
+  |              |          |
+  v              v          v
+ Read          Write      Edit
+ restore       cleanup    restore
+ original      backup     placeholders
+ from backup              in edited file
         |
         v
-  Read:  restore original from backup
-  Edit:  restore placeholders in edited file
-  Write: cleanup backup files
-
-  SessionEnd Hook (on session exit)
+  SessionEnd Hook (on exit)
         |
         v
-  Delete /tmp backup files (mapping preserved)
+  Delete /tmp backup directory
+  (mapping file preserved)
 ```
 
-### Detailed Read Flow (The Core Mechanism)
+### The Read Flow (Core Mechanism)
 
-```
-1. PreToolUse fires for Read(/path/to/config.py)
-2. Hook reads the file from disk
-3. Hook scans content against 100+ regex patterns
-4. Hook creates/loads session mapping (secret <-> placeholder)
-5. Hook backs up original file to /tmp/.claude-backup-{session}/
-6. Hook overwrites original with redacted content (preserves timestamps)
-7. Hook exits 0 (allow) -- Claude Code reads file normally
-   -> Claude Code registers the file as read (KEY!)
-   -> Claude sees redacted content with placeholders
-8. PostToolUse fires -- hook restores original from backup
-```
+This is the key design insight. Claude Code internally tracks which files it has "read."
+If a Read is denied or redirected, Claude cannot Write or Edit that file later (it fails
+with "file has not been read yet"). The solution:
 
-**Why this design?** Claude Code tracks which files have been "read" internally.
-If the Read tool is denied or redirected to a temp file, Claude Code will not
-register the original file path as read. Then Write/Edit to that file fails with
-"file has not been read yet". By temporarily overwriting the original file with
-redacted content and allowing Read to proceed normally, we satisfy Claude Code's
-internal tracking.
+1. `PreToolUse` fires for `Read(/path/to/config.py)`
+2. Hook reads the file, scans against 108 patterns
+3. Hook backs up the original to `/tmp/.claude-backup-{session}/`
+4. Hook overwrites the file in-place with redacted content (preserving timestamps)
+5. Hook exits 0 (allow) -- Claude reads the redacted file normally
+6. Claude Code registers the file path as "read" (this is the key part)
+7. `PostToolUse` fires -- hook restores the original from backup
 
-### Global Placeholder Mapping
-
-Secrets are mapped to deterministic placeholders using HMAC-SHA256. The same secret always produces the same placeholder, even across sessions.
-
-- Mapping stored at: `~/.claude/.redact-mapping.json` (0600 permissions)
-- HMAC key stored at: `~/.claude/.redact-hmac-key` (0400 permissions)
-- Mapping persists across sessions (not deleted on session end)
-- Maximum 10,000 entries with automatic LRU eviction
-
-The secret-to-placeholder mapping persists globally at `~/.claude/.redact-mapping.json`.
-The same secret always maps to the same placeholder. When Claude writes code using
-a placeholder, the Write hook loads the mapping and restores the real value transparently.
+Result: Claude saw redacted content. The real file is untouched. Claude can now Write/Edit the file.
 
 ### Crash Recovery
 
-If Claude Code crashes between PreToolUse (file overwritten) and PostToolUse
-(file restored), the backup remains on disk. On the next hook invocation,
-restore_pending_backups() runs at startup and restores any orphaned backups
-automatically.
+If Claude Code crashes between PreToolUse (file overwritten with redacted content)
+and PostToolUse (original restored), the backup remains on disk. On the next hook
+invocation, `restore_pending_backups()` runs at startup and restores any orphaned
+backups automatically. No manual intervention needed.
 
-## Supported Secret Patterns
+## Secret Patterns
 
-100+ patterns ported from gitleaks and tokligence_guard:
+108 patterns organized by category:
 
-- **AI/ML:** OpenAI, Anthropic, Groq, Perplexity, Hugging Face, Replicate, DeepSeek
-- **Cloud:** AWS, GCP/Firebase, Azure, DigitalOcean, Alibaba, Tencent
-- **DevOps:** GitHub, GitLab, Bitbucket, npm, PyPI, Docker Hub, Terraform, Vault
-- **Payment:** Stripe, Square, PayPal/Braintree, Adyen, Flutterwave
-- **Messaging:** Slack, Discord, Twilio, SendGrid, Mailchimp, Telegram, Teams
-- **Database:** PostgreSQL, MySQL, MongoDB, Redis (connection strings with passwords)
-- **Monitoring:** New Relic, Sentry, Dynatrace
-- **Other:** Shopify, HubSpot, Postman, PlanetScale, Contentful, and many more
+| Category | Count | Examples |
+|----------|------:|---------|
+| AI / ML Providers | 12 | OpenAI, Anthropic, Groq, Perplexity, Hugging Face, Replicate, DeepSeek, GCP/Gemini |
+| Cloud Providers | 9 | AWS (access key, secret, session token), Azure, DigitalOcean, Alibaba Cloud, Tencent |
+| DevOps / CI-CD | 28 | GitHub (6 token types), GitLab (5), Bitbucket, npm, PyPI, Docker Hub, Terraform, Vault, Grafana, Pulumi, Linear |
+| Payment Processors | 10 | Stripe (4 key types), Square, PayPal/Braintree, Adyen, Flutterwave |
+| Communication | 13 | Slack (4 token types), Discord, Twilio, SendGrid, Mailchimp, Mailgun, Telegram, Teams |
+| Database / Storage | 8 | PostgreSQL, MySQL, MongoDB, Redis (connection strings with passwords), PlanetScale, Contentful |
+| Analytics / Monitoring | 5 | New Relic, Sentry, Dynatrace |
+| Auth Providers | 2 | 1Password, Age encryption |
+| Other Services | 16 | Shopify, HubSpot, Postman, JFrog, Duffel, Typeform, EasyPost, and more |
+| Git Credentials | 3 | GitHub/GitLab/generic URLs with embedded tokens |
+| Private Keys / Tokens | 2 | PEM private key blocks, JWT tokens |
+| Generic Patterns | 3 | `api_key=...`, `password=...`, base64 secrets in env-like contexts |
+| **Total** | **108** | |
 
-## Custom Patterns
+## Security Model
 
-Add your own patterns in ~/.claude/hooks/custom-patterns.py (never overwritten by install):
+Secrets are protected by multiple layers:
+
+- **File blocking** prevents the most dangerous files from being read at all
+- **Pattern matching** catches secrets embedded in any file
+- **HMAC-based placeholders** are deterministic (same key = same placeholder) but not reversible
+- **Fernet encryption** protects the mapping file at rest (AES-128-CBC + HMAC-SHA256)
+- **Key separation** -- the HMAC key is used for placeholders, a derived key is used for encryption
+- **File permissions** -- HMAC key is 0400 (read-only, owner only), mapping is 0600
+- **Atomic writes** -- tempfile + rename prevents corruption from crashes or concurrent access
+- **fcntl locking** -- shared locks for reads, exclusive locks for writes
+
+For a detailed explanation of the cryptographic design, threat model, and security
+guarantees, see [docs/SECURITY.md](docs/SECURITY.md).
+
+## Configuration
+
+### Allowlist: `.claude-redact-ignore`
+
+Create this file in your project root or home directory to skip specific files:
+
+```
+# Skip test fixtures (they contain fake secrets)
+tests/fixtures/*
+
+# Skip this specific config
+config/example.yaml
+```
+
+Supports glob patterns. Lines starting with `#` are comments.
+
+The hook checks two locations:
+1. `$CWD/.claude-redact-ignore` (project-level)
+2. `~/.claude-redact-ignore` (global)
+
+### Debug Mode
+
+Set `REDACT_DEBUG=1` to see detailed logs in stderr:
+
+```bash
+REDACT_DEBUG=1 claude
+```
+
+This logs every hook invocation, pattern matches, backup/restore operations, and mapping
+load/save activity.
+
+### Custom Patterns
+
+Add your own patterns in `~/.claude/hooks/custom-patterns.py` (never overwritten by install):
 
 ```python
 CUSTOM_SECRET_PATTERNS = [
     ("MY_INTERNAL_TOKEN", r"mycompany_tok_[A-Za-z0-9]{32,}"),
+    ("INTERNAL_API_KEY", r"internal_[a-f0-9]{64}"),
 ]
+
 CUSTOM_BLOCKED_FILES = [
     "my-secret-config.yaml",
+    ".internal-credentials",
 ]
 ```
 
-## Running Tests
+To get started, copy the example file:
+
+```bash
+cp ~/.claude/hooks/custom-patterns.example.py ~/.claude/hooks/custom-patterns.py
+```
+
+Re-running `install.sh` updates upstream patterns without affecting your custom patterns.
+
+## Files
+
+### Installed files
+
+```
+~/.claude/
+  hooks/
+    redact-restore.py          # Main hook script
+    patterns.py                # 108 secret patterns (updated on install)
+    custom-patterns.py         # Your custom patterns (never overwritten)
+    custom-patterns.example.py # Example custom patterns file
+  settings.json                # Hook registration (PreToolUse + PostToolUse + SessionEnd)
+```
+
+### Runtime files
+
+```
+~/.claude/
+  .redact-hmac-key             # 32-byte master key (permissions 0400, generated once)
+  .redact-mapping.json         # Encrypted secret-to-placeholder mapping (permissions 0600)
+
+/tmp/
+  .claude-backup-{session_id}/ # Temporary file backups during Read (deleted on session end)
+```
+
+### What happens if files are deleted
+
+| File | Effect of deletion |
+|------|--------------------|
+| `.redact-hmac-key` | New key generated on next run. Old mapping becomes unreadable. New placeholders for all secrets. No data loss. |
+| `.redact-mapping.json` | New empty mapping created. Claude generates new placeholders for secrets it encounters. No data loss. |
+| `/tmp/.claude-backup-*` | Only matters if deleted while a session is active. Crash recovery won't be able to restore those files. |
+
+## Testing
+
+Run the full test suite:
+
+```bash
+python3 -m pytest test_hook.py -v
+```
+
+Or without pytest:
 
 ```bash
 python3 test_hook.py
 ```
 
-Tests cover block list, redaction, backup/restore, crash recovery,
-read-then-write cycle (the key bug fix), and performance.
+45 tests cover:
+
+- Block list enforcement (blocked files, allowed files)
+- Redaction correctness (overlapping patterns, Unicode, binary files, empty files)
+- Hook protocol (malformed input, missing fields, unknown tools)
+- File operations (permissions preservation, mtime preservation, atomic writes)
+- Bash command blocking (`cat .env`, input redirection)
+- Placeholder restoration (Write, Edit, Bash commands)
+- Session lifecycle (cleanup, mapping persistence across sessions)
+- Allowlist (`.claude-redact-ignore` patterns)
+- Parallel safety (concurrent mapping access from multiple processes)
+- Crash recovery (orphaned backup restoration)
+- Full E2E flows (Read -> Edit -> Write cycles)
+- Encrypted mapping (Fernet encrypt/decrypt round-trip)
 
 ## Performance
 
-~10-30ms per tool call (Python startup + regex compilation).
+~10-30ms per tool call. The hook is fast because:
+
+- Patterns are compiled once at import time
+- The mapping file is loaded/saved with file locking (no external dependencies)
+- Binary file detection reads only the first 8KB
+- The hook exits early when no secrets are found
+
+## FAQ
+
+**Q: Does this work with all Claude Code tools?**
+A: Yes. Read, Write, Edit, and Bash are all intercepted. Other tools pass through unchanged.
+
+**Q: What if Claude tries to run `cat .env` in a Bash command?**
+A: The hook blocks Bash commands that read blocked files (`cat`, `head`, `tail`, `less`, `more`, `bat`, `source`, and input redirection).
+
+**Q: Will this break my files?**
+A: No. The hook uses atomic writes (tempfile + rename) and backs up every file before modification. Even if Claude Code crashes mid-operation, crash recovery restores originals automatically on the next invocation.
+
+**Q: Why not just use `.gitignore`?**
+A: `.gitignore` prevents files from being committed to git, but Claude Code can still read them. This hook prevents Claude from seeing the secrets in the first place.
+
+**Q: Can I use this with other Claude Code hooks?**
+A: Yes. The installer merges into your existing `settings.json` without removing other hooks.
+
+**Q: What if I don't install the `cryptography` package?**
+A: The mapping file is stored as plaintext JSON instead of encrypted. It still has restricted file permissions (0600), but the contents are readable by anyone with access to your home directory. Installing `cryptography` adds Fernet encryption for defense in depth.
+
+**Q: Do placeholders look the same across machines?**
+A: No. Placeholders are derived from your personal HMAC key (`~/.claude/.redact-hmac-key`), which is unique per machine. The same secret on two different machines produces different placeholders. This is by design -- if someone sees a placeholder, they cannot determine the secret without your key.
+
+**Q: How do I reset everything?**
+A: Delete the key and mapping files, then restart Claude Code:
+```bash
+rm ~/.claude/.redact-hmac-key ~/.claude/.redact-mapping.json
+```
+A new key is generated automatically on the next invocation.
 
 ## License
 
