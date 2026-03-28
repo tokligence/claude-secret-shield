@@ -187,31 +187,88 @@ if not isinstance(input_data, dict):
     debug_log(f"Input is not a dict (type={type(input_data).__name__}), exiting")
     sys.exit(0)
 
+
+def get_prompt_text(payload):
+    """Extract the user prompt across Claude Code variants and wrappers."""
+    candidates = [payload]
+    nested = payload.get("data")
+    if isinstance(nested, dict):
+        candidates.append(nested)
+
+    for candidate in candidates:
+        for key in ("user_prompt", "prompt", "message"):
+            value = candidate.get(key)
+            if isinstance(value, str) and value:
+                return value
+    return ""
+
+
+def get_prompt_storage_dir(payload):
+    """Prefer Claude-provided project cwd over the hook process cwd."""
+    for key in ("cwd", "project_dir"):
+        value = payload.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()
+
+
+def build_redacted_prompt(prompt):
+    """Create a redacted copy of the prompt for safe additionalContext."""
+    matches = []
+    counters = {}
+
+    for pattern_name, compiled_re in COMPILED_PATTERNS:
+        for m in compiled_re.finditer(prompt):
+            matched_value = m.group(0)
+            if len(matched_value) < 8:
+                continue
+            preview = matched_value[:6] + "..." + matched_value[-4:] if len(matched_value) > 14 else matched_value[:4] + "..."
+            counters[pattern_name] = counters.get(pattern_name, 0) + 1
+            placeholder = "{{" + f"{pattern_name}_{counters[pattern_name]}" + "}}"
+            matches.append((m.start(), m.end(), pattern_name, matched_value, preview, placeholder))
+
+    if not matches:
+        return prompt, []
+
+    matches.sort(key=lambda x: x[0], reverse=True)
+    redacted = prompt
+    used_ranges = []
+    found_secrets = []
+    for start, end, pattern_name, matched_value, preview, placeholder in matches:
+        if any(start < used_end and end > used_start for used_start, used_end in used_ranges):
+            continue
+        redacted = redacted[:start] + placeholder + redacted[end:]
+        used_ranges.append((start, end))
+        found_secrets.append((pattern_name, preview))
+
+    found_secrets.reverse()
+    return redacted, found_secrets
+
+
 try:
     # ══════════════════════════════════════════════════════════════════════════
     # UserPromptSubmit: Scan user prompt for secrets before sending to API
     # ══════════════════════════════════════════════════════════════════════════
     hook_event = input_data.get("hook_event_name", "")
     if hook_event == "UserPromptSubmit":
-        prompt = input_data.get("prompt", "")
+        prompt = get_prompt_text(input_data)
+        prompt_dir = get_prompt_storage_dir(input_data)
+        tmp_file = os.path.join(prompt_dir, ".tmp_secrets.conf")
+        tmp_context_file = os.path.join(prompt_dir, ".tmp_secrets.prompt.txt")
         if prompt:
-            found_secrets = []
-            for name, compiled_re in COMPILED_PATTERNS:
-                matches = compiled_re.findall(prompt)
-                if matches:
-                    for m in matches:
-                        # Truncate the match for display (don't echo the secret back)
-                        preview = m[:6] + "..." + m[-4:] if len(m) > 14 else m[:4] + "..."
-                        found_secrets.append((name, preview))
+            redacted_prompt, found_secrets = build_redacted_prompt(prompt)
             if found_secrets:
                 secret_list = ", ".join(f"{n} ({p})" for n, p in found_secrets[:5])
                 extra = f" and {len(found_secrets) - 5} more" if len(found_secrets) > 5 else ""
-                # Save the full prompt to .tmp_secrets.conf so user can just re-reference it
-                tmp_file = os.path.join(os.getcwd(), ".tmp_secrets.conf")
+                # Save the full prompt plus a redacted companion so "go" can restore intent safely.
                 try:
+                    os.makedirs(prompt_dir, exist_ok=True)
                     with open(tmp_file, "w") as tf:
                         tf.write(prompt)
+                    with open(tmp_context_file, "w") as tf:
+                        tf.write(redacted_prompt)
                     os.chmod(tmp_file, 0o600)
+                    os.chmod(tmp_context_file, 0o600)
                     debug_log(f"Saved prompt to {tmp_file}")
                     saved = True
                 except OSError as e:
@@ -237,16 +294,33 @@ try:
                 sys.exit(0)
         # Check if user typed "go" to continue from a blocked prompt
         if prompt.strip().lower() in ("go", "go.", "继续", "continue"):
-            tmp_file = os.path.join(os.getcwd(), ".tmp_secrets.conf")
             if os.path.exists(tmp_file):
                 debug_log("UserPromptSubmit: 'go' detected with .tmp_secrets.conf, adding context")
+                redacted_prompt = ""
+                try:
+                    with open(tmp_context_file, "r") as tf:
+                        redacted_prompt = tf.read().strip()
+                except OSError:
+                    pass
+
+                additional_context = (
+                    "[claude-secret-shield] The user's previous prompt was blocked because it "
+                    "contained secrets. Treat this current message as confirmation to continue "
+                    "the previously blocked request.\n\n"
+                )
+                if redacted_prompt:
+                    additional_context += (
+                        "Previously blocked prompt (redacted):\n"
+                        f"{redacted_prompt}\n\n"
+                    )
+                additional_context += (
+                    f"Read {tmp_file} to recover the exact placeholderized values, then continue "
+                    "the user's original request. Secrets in that file are auto-redacted for safety."
+                )
                 print(json.dumps({
                     "hookSpecificOutput": {
                         "hookEventName": "UserPromptSubmit",
-                        "additionalContext": (
-                            "[claude-secret-shield] Read .tmp_secrets.conf and follow the user\'s request in it. "
-                            "Secrets in that file are auto-redacted for safety."
-                        )
+                        "additionalContext": additional_context
                     }
                 }))
                 sys.exit(0)

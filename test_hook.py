@@ -1109,9 +1109,20 @@ if __name__ == "__main__":
 class TestUserPromptSubmit:
     """Test that secrets in user prompts are detected and blocked."""
 
-    def _run_prompt_hook(self, prompt_text):
-        payload = {"hook_event_name": "UserPromptSubmit", "session_id": _session_id(), "prompt": prompt_text}
-        r = subprocess.run([sys.executable, HOOK_SCRIPT], input=json.dumps(payload), capture_output=True, text=True, timeout=10)
+    def _run_prompt_hook(self, prompt_text, *, field="prompt", cwd=None, extra_payload=None):
+        payload = {"hook_event_name": "UserPromptSubmit", "session_id": _session_id(), field: prompt_text}
+        if cwd is not None:
+            payload["cwd"] = str(cwd)
+        if extra_payload:
+            payload.update(extra_payload)
+        r = subprocess.run(
+            [sys.executable, HOOK_SCRIPT],
+            input=json.dumps(payload),
+            capture_output=True,
+            text=True,
+            timeout=10,
+            cwd=cwd,
+        )
         parsed = None
         if r.stdout.strip():
             try:
@@ -1177,3 +1188,30 @@ class TestUserPromptSubmit:
         result, code, _ = self._run_prompt_hook("sk-proj-abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmn")
         assert code == 0 and result is not None
         assert "reply" in result["reason"].lower() and "go" in result["reason"].lower()
+
+    def test_user_prompt_field_supported(self):
+        result, code, _ = self._run_prompt_hook(
+            "Use this key: sk-proj-abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmn",
+            field="user_prompt",
+        )
+        assert code == 0 and result is not None
+        assert result["decision"] == "block"
+
+    def test_go_restores_redacted_context(self, tmp_path):
+        blocked_prompt = (
+            "帮我配置 git，在 /tmp/a 用 tony.seah@kleepay.ai，"
+            "在 /tmp/b 用 seahkweehwatony@gmail.com"
+        )
+        result, code, _ = self._run_prompt_hook(blocked_prompt, cwd=tmp_path, field="user_prompt")
+        assert code == 0 and result is not None
+        assert result["decision"] == "block"
+        assert (tmp_path / ".tmp_secrets.conf").exists()
+        assert (tmp_path / ".tmp_secrets.prompt.txt").exists()
+
+        result, code, _ = self._run_prompt_hook("go", cwd=tmp_path, field="user_prompt")
+        assert code == 0 and result is not None
+        extra = result["hookSpecificOutput"]["additionalContext"]
+        assert "previously blocked request" in extra.lower()
+        assert "帮我配置 git" in extra
+        assert "{{EMAIL_" in extra
+        assert str(tmp_path / ".tmp_secrets.conf") in extra
