@@ -1099,3 +1099,81 @@ class TestGlobalMapping:
 
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# UserPromptSubmit Tests — Strategy 4: Prompt secret scanning
+# ══════════════════════════════════════════════════════════════════════════
+
+
+class TestUserPromptSubmit:
+    """Test that secrets in user prompts are detected and blocked."""
+
+    def _run_prompt_hook(self, prompt_text):
+        payload = {"hook_event_name": "UserPromptSubmit", "session_id": _session_id(), "prompt": prompt_text}
+        r = subprocess.run([sys.executable, HOOK_SCRIPT], input=json.dumps(payload), capture_output=True, text=True, timeout=10)
+        parsed = None
+        if r.stdout.strip():
+            try:
+                parsed = json.loads(r.stdout)
+            except json.JSONDecodeError:
+                pass
+        return parsed, r.returncode, r.stderr
+
+    def test_clean_prompt_allowed(self):
+        result, code, _ = self._run_prompt_hook("Please help me write a sort function")
+        assert code == 0
+        if result:
+            assert result.get("decision") != "block"
+
+    def test_openai_key_blocked(self):
+        result, code, _ = self._run_prompt_hook("Use this key: sk-proj-abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmn")
+        assert code == 0 and result is not None
+        assert result["decision"] == "block"
+        assert "Secret detected" in result["reason"]
+
+    def test_postgres_url_blocked(self):
+        result, code, _ = self._run_prompt_hook("Connect to postgres://myuser:s3cretP4ss@db.example.com:5432/mydb")
+        assert code == 0 and result is not None and result["decision"] == "block"
+
+    def test_aws_key_blocked(self):
+        result, code, _ = self._run_prompt_hook("My AWS key is AKIAIOSFODNN7EXAMPLE")
+        assert code == 0 and result is not None and result["decision"] == "block"
+
+    def test_github_pat_blocked(self):
+        result, code, _ = self._run_prompt_hook("Token: ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij")
+        assert code == 0 and result is not None and result["decision"] == "block"
+
+    def test_stripe_key_blocked(self):
+        result, code, _ = self._run_prompt_hook("Key: sk_test_FAKE51TESTxxxxxxxxxxxxxxxxxxxxxxxxxxx")
+        assert code == 0 and result is not None and result["decision"] == "block"
+
+    def test_jwt_blocked(self):
+        result, code, _ = self._run_prompt_hook("Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U")
+        assert code == 0 and result is not None and result["decision"] == "block"
+
+    def test_pem_key_blocked(self):
+        result, code, _ = self._run_prompt_hook("-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAK...")
+        assert code == 0 and result is not None and result["decision"] == "block"
+
+    def test_contract_address_not_blocked(self):
+        result, code, _ = self._run_prompt_hook("Contract: 0xe63f1adbc4c2eaa088c5e78d2a0cf51272ef9688")
+        assert code == 0
+        if result:
+            assert result.get("decision") != "block"
+
+    def test_empty_prompt_allowed(self):
+        result, code, _ = self._run_prompt_hook("")
+        assert code == 0
+        if result:
+            assert result.get("decision") != "block"
+
+    def test_preview_truncated(self):
+        result, code, _ = self._run_prompt_hook("ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij")
+        assert code == 0 and result is not None and result["decision"] == "block"
+        assert "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij" not in result["reason"]
+
+    def test_tip_in_reason(self):
+        result, code, _ = self._run_prompt_hook("sk-proj-abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmn")
+        assert code == 0 and result is not None
+        assert "env var" in result["reason"].lower() or "file" in result["reason"].lower()

@@ -97,16 +97,24 @@ SESSION_END_HOOK_CONFIG='{
     }
   ]
 }'
+
+PROMPT_HOOK_CONFIG='{
+  "type": "command",
+  "command": "python3 ~/.claude/hooks/redact-restore.py",
+  "timeout": 5
+}'
 if [ -f "$SETTINGS_FILE" ]; then
   EXISTING=$(cat "$SETTINGS_FILE")
 
   HAS_HOOKS=$(echo "$EXISTING" | jq 'has("hooks")' 2>/dev/null || echo "false")
 
   if [ "$HAS_HOOKS" = "true" ]; then
-    # Remove any old hook entries, add both PreToolUse and PostToolUse
+    # Remove any old hook entries, add PreToolUse, PostToolUse, UserPromptSubmit, SessionEnd
     UPDATED=$(echo "$EXISTING" | jq \
       --argjson pre_hook "$PRE_HOOK_CONFIG" \
-      --argjson post_hook "$POST_HOOK_CONFIG"       --argjson stop_hook "$SESSION_END_HOOK_CONFIG" '
+      --argjson post_hook "$POST_HOOK_CONFIG" \
+      --argjson stop_hook "$SESSION_END_HOOK_CONFIG" \
+      --argjson prompt_hook "$PROMPT_HOOK_CONFIG" '
       .hooks.PreToolUse = (
         (.hooks.PreToolUse // [])
         | map(select(
@@ -123,13 +131,22 @@ if [ -f "$SETTINGS_FILE" ]; then
       ) + [$post_hook]
       |
       .hooks.SessionEnd = [$stop_hook]
+      |
+      .hooks.UserPromptSubmit = (
+        (.hooks.UserPromptSubmit // [])
+        | map(select(
+            (.hooks[0].command != "python3 ~/.claude/hooks/redact-restore.py") and
+            (.command != "python3 ~/.claude/hooks/redact-restore.py")
+          ))
+      ) + [$prompt_hook]
     ')
   else
     UPDATED=$(echo "$EXISTING" | jq \
       --argjson pre_hook "$PRE_HOOK_CONFIG" \
       --argjson post_hook "$POST_HOOK_CONFIG" \
-      --argjson stop_hook "$SESSION_END_HOOK_CONFIG" '
-      .hooks = { "PreToolUse": [$pre_hook], "PostToolUse": [$post_hook], "SessionEnd": [$stop_hook] }
+      --argjson stop_hook "$SESSION_END_HOOK_CONFIG" \
+      --argjson prompt_hook "$PROMPT_HOOK_CONFIG" '
+      .hooks = { "PreToolUse": [$pre_hook], "PostToolUse": [$post_hook], "SessionEnd": [$stop_hook], "UserPromptSubmit": [$prompt_hook] }
     ')
   fi
 
@@ -138,8 +155,9 @@ else
   jq -n \
     --argjson pre_hook "$PRE_HOOK_CONFIG" \
     --argjson post_hook "$POST_HOOK_CONFIG" \
-    --argjson stop_hook "$SESSION_END_HOOK_CONFIG" '{
-    hooks: { PreToolUse: [$pre_hook], PostToolUse: [$post_hook], SessionEnd: [$stop_hook] }
+    --argjson stop_hook "$SESSION_END_HOOK_CONFIG" \
+    --argjson prompt_hook "$PROMPT_HOOK_CONFIG" '{
+    hooks: { PreToolUse: [$pre_hook], PostToolUse: [$post_hook], SessionEnd: [$stop_hook], UserPromptSubmit: [$prompt_hook] }
   }' > "$SETTINGS_FILE"
 fi
 
@@ -152,6 +170,7 @@ echo "  How it works:"
 echo "    - Strategy 1: Blocked files (.env, credentials, etc.) are never read"
 echo "    - Strategy 2: Secrets in any file are replaced with {{PLACEHOLDER}} tokens"
 echo "    - Strategy 3: Placeholders are restored to real values when writing files"
+echo "    - Strategy 4: User prompts are scanned — blocks if secrets are pasted"
 echo ""
 echo "  Upstream patterns:  ~/.claude/hooks/patterns.py (updated on each install)"
 echo "  Custom patterns:    ~/.claude/hooks/custom-patterns.py (never overwritten)"

@@ -188,6 +188,40 @@ if not isinstance(input_data, dict):
     sys.exit(0)
 
 try:
+    # ══════════════════════════════════════════════════════════════════════════
+    # UserPromptSubmit: Scan user prompt for secrets before sending to API
+    # ══════════════════════════════════════════════════════════════════════════
+    hook_event = input_data.get("hook_event_name", "")
+    if hook_event == "UserPromptSubmit":
+        prompt = input_data.get("prompt", "")
+        if prompt:
+            found_secrets = []
+            for name, compiled_re in COMPILED_PATTERNS:
+                matches = compiled_re.findall(prompt)
+                if matches:
+                    for m in matches:
+                        # Truncate the match for display (don't echo the secret back)
+                        preview = m[:6] + "..." + m[-4:] if len(m) > 14 else m[:4] + "..."
+                        found_secrets.append((name, preview))
+            if found_secrets:
+                secret_list = ", ".join(f"{n} ({p})" for n, p in found_secrets[:5])
+                extra = f" and {len(found_secrets) - 5} more" if len(found_secrets) > 5 else ""
+                reason = (
+                    f"🛡️ Secret detected in your prompt: {secret_list}{extra}. "
+                    f"Secrets in prompts are sent directly to the API and cannot be redacted. "
+                    f"Please remove the secret and try again. "
+                    f"Tip: put secrets in env vars or files instead."
+                )
+                debug_log(f"UserPromptSubmit BLOCKED: {[n for n,_ in found_secrets]}")
+                print(json.dumps({
+                    "decision": "block",
+                    "reason": reason
+                }))
+                sys.exit(0)
+        # No secrets found — allow prompt
+        debug_log("UserPromptSubmit: no secrets found, allowing")
+        sys.exit(0)
+
     tool_name = input_data.get("tool_name", "")
     tool_input = input_data.get("tool_input", {})
     session_id = input_data.get("session_id", "default")
