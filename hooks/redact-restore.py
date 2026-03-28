@@ -6,7 +6,8 @@ Strategy 1: Block list — certain files are never read (.env, credentials, etc.
 Strategy 2: Pattern-based redact — secrets in ANY file are replaced with consistent placeholders
 Strategy 3: Restore on write — placeholders are restored to real values when writing files
 
-Session mapping stored at: /tmp/.claude-redact-{session_id}.json
+Global mapping stored at:  ~/.claude/.redact-mapping.json (persistent across sessions)
+HMAC key stored at:        ~/.claude/.redact-hmac-key (deterministic placeholders)
 File backups stored at:    /tmp/.claude-backup-{session_id}/
 
 Hook input (stdin JSON):
@@ -30,7 +31,9 @@ import sys
 import json
 import os
 import re
+import base64
 import hashlib
+import hmac
 import tempfile
 import shutil
 import fcntl
@@ -46,6 +49,37 @@ def debug_log(msg):
     """Log to stderr when REDACT_DEBUG=1."""
     if DEBUG:
         print(f"[redact-restore {time.strftime('%H:%M:%S')}] {msg}", file=sys.stderr)
+
+# ── Global mapping path and HMAC key ─────────────────────────────────────
+GLOBAL_MAPPING_PATH = os.path.expanduser("~/.claude/.redact-mapping.json")
+MAX_MAPPING_ENTRIES = 10000
+
+
+def get_or_create_hmac_key():
+    """Load or create a per-user HMAC key for deterministic placeholder generation."""
+    key_path = os.path.expanduser("~/.claude/.redact-hmac-key")
+    os.makedirs(os.path.dirname(key_path), exist_ok=True)
+    if os.path.exists(key_path):
+        with open(key_path, 'rb') as f:
+            return f.read()
+    key = os.urandom(32)
+    fd = os.open(key_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o400)
+    with os.fdopen(fd, 'wb') as f:
+        f.write(key)
+    return key
+
+
+HMAC_KEY = get_or_create_hmac_key()
+
+# Derive a Fernet encryption key from the HMAC key for encrypting the mapping file.
+# Fernet requires a 32-byte base64url-encoded key.
+try:
+    from cryptography.fernet import Fernet
+    _fernet_key = base64.urlsafe_b64encode(hashlib.sha256(HMAC_KEY + b"mapping-encryption").digest())
+    FERNET = Fernet(_fernet_key)
+except ImportError:
+    FERNET = None  # Fallback: plaintext (with warning on first use)
+
 
 # ── Load patterns ────────────────────────────────────────────────────────
 # Import from patterns.py in the same directory, or fall back to inline
@@ -161,7 +195,7 @@ try:
 
     debug_log(f"Hook start: tool={tool_name} post={is_post_hook} session={session_id}")
 
-    MAPPING_FILE = f"/tmp/.claude-redact-{session_id}.json"
+    MAPPING_FILE = GLOBAL_MAPPING_PATH
     BACKUP_DIR = os.path.join(tempfile.gettempdir(), f".claude-backup-{session_id}")
 
 
@@ -211,40 +245,88 @@ try:
 
     # ── Mapping management ───────────────────────────────────────────────────
     def load_mapping():
-        """Load the session mapping file. Returns empty mapping on any error."""
+        """Load the global mapping file (encrypted if Fernet available). Returns empty mapping on any error."""
+        path = MAPPING_FILE
         try:
-            if os.path.exists(MAPPING_FILE):
-                with open(MAPPING_FILE, 'r') as f:
+            if os.path.exists(path):
+                # Permission enforcement: fix group/other access
+                st = os.stat(path)
+                if st.st_mode & 0o077:
+                    os.chmod(path, 0o600)
+                with open(path, 'rb') as f:
                     fcntl.flock(f.fileno(), fcntl.LOCK_SH)
-                    data = json.load(f)
+                    raw = f.read()
                     fcntl.flock(f.fileno(), fcntl.LOCK_UN)
-                    return data
-        except (json.JSONDecodeError, OSError, PermissionError):
+
+                # Try decrypting (Fernet encrypted)
+                if FERNET and raw:
+                    try:
+                        decrypted = FERNET.decrypt(raw)
+                        data = json.loads(decrypted)
+                    except Exception:
+                        # Fallback: try reading as plaintext (migration from unencrypted)
+                        try:
+                            data = json.loads(raw)
+                            debug_log("Loaded plaintext mapping, will re-save encrypted")
+                        except (json.JSONDecodeError, UnicodeDecodeError):
+                            return {"secret_to_placeholder": {}, "placeholder_to_secret": {}}
+                else:
+                    # No Fernet: plaintext mode
+                    data = json.loads(raw)
+
+                data.pop("counters", None)
+                data.setdefault("secret_to_placeholder", {})
+                data.setdefault("placeholder_to_secret", {})
+                return data
+        except (json.JSONDecodeError, OSError, PermissionError, UnicodeDecodeError):
             pass
-        return {"secret_to_placeholder": {}, "placeholder_to_secret": {}, "counters": {}}
+        return {"secret_to_placeholder": {}, "placeholder_to_secret": {}}
 
 
     def save_mapping(mapping):
-        """Persist the mapping file with restricted permissions."""
+        """Persist the global mapping file (encrypted) with restricted permissions and LRU eviction."""
         try:
+            # Evict oldest entries if over limit
+            if len(mapping.get("secret_to_placeholder", {})) > MAX_MAPPING_ENTRIES:
+                entries = list(mapping["secret_to_placeholder"].items())
+                keep = entries[len(entries) // 2:]
+                mapping["secret_to_placeholder"] = dict(keep)
+                mapping["placeholder_to_secret"] = {v: k for k, v in mapping["secret_to_placeholder"].items()}
+                debug_log(f"Evicted {len(entries) - len(keep)} old mapping entries")
+
+            mapping.pop("counters", None)
+
+            json_bytes = json.dumps(mapping).encode('utf-8')
+
+            # Encrypt if Fernet available
+            if FERNET:
+                payload = FERNET.encrypt(json_bytes)
+            else:
+                payload = json_bytes
+
+            os.makedirs(os.path.dirname(MAPPING_FILE), exist_ok=True)
             fd = os.open(MAPPING_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-            with os.fdopen(fd, "w") as f:
+            with os.fdopen(fd, "wb") as f:
                 fcntl.flock(f.fileno(), fcntl.LOCK_EX)
-                json.dump(mapping, f)
+                f.write(payload)
                 fcntl.flock(f.fileno(), fcntl.LOCK_UN)
-            debug_log(f"Mapping saved: {len(mapping.get('secret_to_placeholder', {}))} secrets")
+            debug_log(f"Mapping saved ({'encrypted' if FERNET else 'plaintext'}): {len(mapping.get('secret_to_placeholder', {}))} secrets")
         except OSError:
             pass
 
 
     def get_placeholder(mapping, secret_value, pattern_name):
-        """Get or create a consistent placeholder for a secret value."""
+        """Get or create a deterministic HMAC-based placeholder for a secret value."""
         if secret_value in mapping["secret_to_placeholder"]:
             return mapping["secret_to_placeholder"][secret_value]
 
-        counter = mapping["counters"].get(pattern_name, 0) + 1
-        mapping["counters"][pattern_name] = counter
-        placeholder = "{{" + f"{pattern_name}_{counter}" + "}}"
+        digest = hmac.new(HMAC_KEY, secret_value.encode('utf-8', errors='replace'), hashlib.sha256).hexdigest()[:8]
+        placeholder = "{{" + f"{pattern_name}_{digest}" + "}}"
+
+        # Handle unlikely hash collision
+        while placeholder in mapping["placeholder_to_secret"] and mapping["placeholder_to_secret"][placeholder] != secret_value:
+            digest = digest + "x"
+            placeholder = "{{" + f"{pattern_name}_{digest}" + "}}"
 
         mapping["secret_to_placeholder"][secret_value] = placeholder
         mapping["placeholder_to_secret"][placeholder] = secret_value
@@ -478,14 +560,10 @@ try:
     # SessionEnd / Stop hook: Clean up sensitive mapping and backup files
     # ══════════════════════════════════════════════════════════════════════════
     if input_data.get("type") in ("SessionEnd", "Stop") or tool_name in ("SessionEnd", "Stop"):
-        debug_log("Session end: cleaning up mapping and backups")
-        # Remove the mapping file (contains real secret values)
-        try:
-            if os.path.exists(MAPPING_FILE):
-                os.remove(MAPPING_FILE)
-        except OSError:
-            pass
-        # Remove any leftover backup files
+        debug_log("Session end: cleaning up backups (mapping preserved)")
+        # Do NOT delete the global mapping file — it persists across sessions
+        debug_log(f"Session ended, mapping preserved at {MAPPING_FILE}")
+        # Remove any leftover backup files (per-session, transient)
         if os.path.isdir(BACKUP_DIR):
             try:
                 shutil.rmtree(BACKUP_DIR)

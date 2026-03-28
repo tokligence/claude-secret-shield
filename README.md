@@ -38,15 +38,16 @@ curl -sL https://raw.githubusercontent.com/tokligence/claude-code-redact-restore
 
 ```
 ~/.claude/
-  settings.json          # Hook registration (PreToolUse + PostToolUse)
+  settings.json              # Hook registration (PreToolUse + PostToolUse)
+  .redact-mapping.json       # Global secret-to-placeholder mapping (chmod 600)
+  .redact-hmac-key           # HMAC key for deterministic placeholders (chmod 400)
   hooks/
-    redact-restore.py    # Main hook script (handles both Pre and Post)
-    patterns.py          # 100+ secret regex patterns (upstream, updated on install)
-    custom-patterns.py   # User custom patterns (never overwritten)
+    redact-restore.py        # Main hook script (handles both Pre and Post)
+    patterns.py              # 100+ secret regex patterns (upstream, updated on install)
+    custom-patterns.py       # User custom patterns (never overwritten)
 
 /tmp/
-  .claude-redact-{session_id}.json   # Secret-to-placeholder mapping (chmod 600)
-  .claude-backup-{session_id}/       # Temporary file backups during Read
+  .claude-backup-{session_id}/   # Temporary file backups during Read
 ```
 
 ### Hook Registration
@@ -104,7 +105,7 @@ Claude Code issues a tool call (Read, Write, Edit, or Bash)
   SessionEnd Hook (on session exit)
         |
         v
-  Delete /tmp mapping + backup files
+  Delete /tmp backup files (mapping preserved)
 ```
 
 ### Detailed Read Flow (The Core Mechanism)
@@ -129,12 +130,18 @@ register the original file path as read. Then Write/Edit to that file fails with
 redacted content and allowing Read to proceed normally, we satisfy Claude Code's
 internal tracking.
 
-### Session Mapping Consistency
+### Global Placeholder Mapping
 
-The secret-to-placeholder mapping persists across all hook invocations within a
-session via /tmp/.claude-redact-{session_id}.json. The same secret always maps
-to the same placeholder. When Claude writes code using a placeholder, the Write
-hook loads the mapping and restores the real value transparently.
+Secrets are mapped to deterministic placeholders using HMAC-SHA256. The same secret always produces the same placeholder, even across sessions.
+
+- Mapping stored at: `~/.claude/.redact-mapping.json` (0600 permissions)
+- HMAC key stored at: `~/.claude/.redact-hmac-key` (0400 permissions)
+- Mapping persists across sessions (not deleted on session end)
+- Maximum 10,000 entries with automatic LRU eviction
+
+The secret-to-placeholder mapping persists globally at `~/.claude/.redact-mapping.json`.
+The same secret always maps to the same placeholder. When Claude writes code using
+a placeholder, the Write hook loads the mapping and restores the real value transparently.
 
 ### Crash Recovery
 

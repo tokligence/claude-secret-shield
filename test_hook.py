@@ -13,6 +13,8 @@ Runs the actual hook script via subprocess, validating:
 - Full E2E flows (Read, Write, Edit)
 """
 
+import base64
+import hashlib
 import json
 import os
 import subprocess
@@ -26,6 +28,20 @@ import threading
 import pytest
 
 HOOK_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "hooks", "redact-restore.py")
+GLOBAL_MAPPING_PATH = os.path.expanduser("~/.claude/.redact-mapping.json")
+HMAC_KEY_PATH = os.path.expanduser("~/.claude/.redact-hmac-key")
+
+
+def _get_fernet():
+    """Get the Fernet instance for decrypting the mapping file (matches the hook's derivation)."""
+    try:
+        from cryptography.fernet import Fernet
+        with open(HMAC_KEY_PATH, 'rb') as f:
+            hmac_key = f.read()
+        fernet_key = base64.urlsafe_b64encode(hashlib.sha256(hmac_key + b"mapping-encryption").digest())
+        return Fernet(fernet_key)
+    except Exception:
+        return None
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────
@@ -36,20 +52,35 @@ def _session_id():
 
 
 def _mapping_file(sid):
-    return f"/tmp/.claude-redact-{sid}.json"
+    """Global mapping file (same for all sessions)."""
+    return GLOBAL_MAPPING_PATH
 
 
 def _backup_dir(sid):
     return os.path.join(tempfile.gettempdir(), f".claude-backup-{sid}")
 
 
-def _ph(name, n=1):
-    """Build placeholder string like {{GITHUB_PAT_CLASSIC_1}}."""
-    return "{{" + f"{name}_{n}" + "}}"
+def _ph_from_mapping(secret_value):
+    """Look up the placeholder for a secret from the global mapping file (supports encrypted)."""
+    try:
+        with open(GLOBAL_MAPPING_PATH, 'rb') as f:
+            raw = f.read()
+        fernet = _get_fernet()
+        if fernet:
+            try:
+                decrypted = fernet.decrypt(raw)
+                data = json.loads(decrypted)
+            except Exception:
+                data = json.loads(raw)  # fallback to plaintext
+        else:
+            data = json.loads(raw)
+        return data.get("secret_to_placeholder", {}).get(secret_value)
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+        return None
 
 
 def _ph_prefix(name):
-    """Build placeholder prefix like {{GITHUB_PAT_CLASSIC."""
+    """Build placeholder prefix like {{GITHUB_PAT_CLASSIC_."""
     return "{{" + name
 
 
@@ -93,12 +124,29 @@ def run_hook_raw(stdin_str):
 
 
 def cleanup(sid):
-    mf = _mapping_file(sid)
+    """Clean up backup directory for a session. Global mapping is preserved."""
     bd = _backup_dir(sid)
-    if os.path.exists(mf):
-        os.remove(mf)
     if os.path.isdir(bd):
         shutil.rmtree(bd)
+
+
+def _save_global_mapping_snapshot():
+    """Save a copy of the global mapping file (binary, may be encrypted) for later restoration."""
+    if os.path.exists(GLOBAL_MAPPING_PATH):
+        with open(GLOBAL_MAPPING_PATH, 'rb') as f:
+            return f.read()
+    return None
+
+
+def _restore_global_mapping_snapshot(snapshot):
+    """Restore the global mapping file from a snapshot."""
+    if snapshot is None:
+        if os.path.exists(GLOBAL_MAPPING_PATH):
+            os.remove(GLOBAL_MAPPING_PATH)
+    else:
+        os.makedirs(os.path.dirname(GLOBAL_MAPPING_PATH), exist_ok=True)
+        with open(GLOBAL_MAPPING_PATH, 'wb') as f:
+            f.write(snapshot)
 
 
 def _tmp(content, suffix=".py"):
@@ -112,11 +160,16 @@ def _tmp(content, suffix=".py"):
 
 @pytest.fixture
 def sid():
-    """Provide a unique session ID and clean up after each test."""
+    """Provide a unique session ID and clean up after each test.
+
+    Saves and restores the global mapping file around each test for isolation.
+    """
     s = _session_id()
+    snapshot = _save_global_mapping_snapshot()
     cleanup(s)
     yield s
     cleanup(s)
+    _restore_global_mapping_snapshot(snapshot)
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -178,7 +231,8 @@ class TestRedactRestore:
             run_hook("Read", {"file_path": f}, sid)
             with open(f) as fh:
                 red = fh.read()
-            ph = _ph("GITHUB_PAT_CLASSIC")
+            ph = _ph_from_mapping(s)
+            assert ph is not None, "Placeholder should exist in mapping"
             assert red.count(ph) == 2
             run_hook("Read", {"file_path": f}, sid, is_post=True)
         finally:
@@ -190,7 +244,8 @@ class TestRedactRestore:
         try:
             run_hook("Read", {"file_path": f}, sid)
             run_hook("Read", {"file_path": f}, sid, is_post=True)
-            ph = _ph("GITHUB_PAT_CLASSIC")
+            ph = _ph_from_mapping(s)
+            assert ph is not None
             o, c, _ = run_hook("Write", {"file_path": "/out.py", "content": f"TOKEN={ph}\n"}, sid)
             assert c == 0 and o is not None
             assert o["hookSpecificOutput"]["updatedInput"]["content"] == f"TOKEN={s}\n"
@@ -203,7 +258,8 @@ class TestRedactRestore:
         try:
             run_hook("Read", {"file_path": f}, sid)
             run_hook("Read", {"file_path": f}, sid, is_post=True)
-            ph = _ph("STRIPE_SECRET_KEY")
+            ph = _ph_from_mapping(s)
+            assert ph is not None
             o, _, _ = run_hook("Edit", {"file_path": "/f.py", "old_string": "KEY=old", "new_string": f"KEY={ph}"}, sid)
             assert o is not None
             assert o["hookSpecificOutput"]["updatedInput"]["new_string"] == f"KEY={s}"
@@ -245,7 +301,8 @@ class TestRedactRestore:
             o, c, _ = run_hook("Read", {"file_path": f}, sid)
             assert c == 0 and o is None
             run_hook("Read", {"file_path": f}, sid, is_post=True)
-            ph = _ph("GITHUB_PAT_CLASSIC")
+            ph = _ph_from_mapping(s)
+            assert ph is not None
             o, c, _ = run_hook("Write", {"file_path": f, "content": f"TOKEN={ph}\nVER=2\n"}, sid)
             assert c == 0 and o is not None
             assert o["hookSpecificOutput"]["updatedInput"]["content"] == f"TOKEN={s}\nVER=2\n"
@@ -289,7 +346,8 @@ class TestRedactRestore:
             run_hook("Read", {"file_path": f}, sid)
             run_hook("Read", {"file_path": f}, sid, is_post=True)
 
-            ph = _ph("GITHUB_PAT_CLASSIC")
+            ph = _ph_from_mapping(s)
+            assert ph is not None
             o, c, _ = run_hook("Write", {"file_path": f, "content": f"NEW_TOKEN={ph}\n"}, sid)
             assert c == 0 and o is not None
             assert o["hookSpecificOutput"]["updatedInput"]["content"] == f"NEW_TOKEN={s}\n"
@@ -351,7 +409,8 @@ class TestRedactionCorrectness:
             run_hook("Read", {"file_path": f}, sid)
             with open(f) as fh:
                 red = fh.read()
-            ph = _ph("GITHUB_PAT_CLASSIC")
+            ph = _ph_from_mapping(token)
+            assert ph is not None, "Placeholder should exist in mapping"
             assert red.count(ph) == 3, f"Expected 3 placeholders, got {red.count(ph)}"
             assert token not in red
             run_hook("Read", {"file_path": f}, sid, is_post=True)
@@ -569,7 +628,8 @@ class TestBashBlocking:
             run_hook("Read", {"file_path": f}, sid, is_post=True)
 
             # Now use the placeholder in a bash command
-            ph = _ph("GITHUB_PAT_CLASSIC")
+            ph = _ph_from_mapping(token)
+            assert ph is not None
             o, c, _ = run_hook("Bash", {"command": f"echo {ph}"}, sid)
             assert c == 0
             assert o is not None
@@ -584,7 +644,7 @@ class TestBashBlocking:
 
 class TestSessionLifecycle:
     def test_session_end_cleanup(self, sid):
-        """Send SessionEnd event — mapping file should be deleted."""
+        """Send SessionEnd event — global mapping preserved, backups deleted."""
         # First create some mapping
         token = "ghp_" + "X" * 36
         content = f"TOKEN={token}\n"
@@ -594,6 +654,13 @@ class TestSessionLifecycle:
             run_hook("Read", {"file_path": f}, sid, is_post=True)
             # Mapping file should exist
             assert os.path.exists(_mapping_file(sid)), "Mapping file should exist before SessionEnd"
+
+            # Create a backup dir to verify it gets cleaned up
+            bd = _backup_dir(sid)
+            os.makedirs(bd, exist_ok=True)
+            sentinel = os.path.join(bd, "test_sentinel")
+            with open(sentinel, "w") as sf:
+                sf.write("test")
 
             # Send SessionEnd
             payload = {"tool_name": "SessionEnd", "tool_input": {}, "session_id": sid, "type": "SessionEnd"}
@@ -605,12 +672,15 @@ class TestSessionLifecycle:
                 timeout=10,
             )
             assert r.returncode == 0
-            assert not os.path.exists(_mapping_file(sid)), "Mapping file should be deleted after SessionEnd"
+            # Global mapping should still exist (not deleted on session end)
+            assert os.path.exists(_mapping_file(sid)), "Global mapping should be preserved after SessionEnd"
+            # Backups should be deleted
+            assert not os.path.isdir(bd), "Backup dir should be deleted after SessionEnd"
         finally:
             if os.path.exists(f):
                 os.unlink(f)
 
-    def test_mapping_persistence(self, sid):
+    def test_mapping_persistence_within_session(self, sid):
         """Redact in PreToolUse — mapping exists — restore in PostToolUse uses same mapping."""
         token = "ghp_" + "Y" * 36
         content = f"TOKEN={token}\n"
@@ -630,7 +700,8 @@ class TestSessionLifecycle:
             assert os.path.exists(_mapping_file(sid))
 
             # Write with placeholder should restore from same mapping
-            ph = _ph("GITHUB_PAT_CLASSIC")
+            ph = _ph_from_mapping(token)
+            assert ph is not None
             o, c, _ = run_hook("Write", {"file_path": "/out.py", "content": f"TOKEN={ph}\n"}, sid)
             assert c == 0 and o is not None
             assert o["hookSpecificOutput"]["updatedInput"]["content"] == f"TOKEN={token}\n"
@@ -692,11 +763,12 @@ class TestAllowlist:
 
 class TestParallelSafety:
     def test_concurrent_mapping_access(self, sid):
-        """5 parallel hook invocations with independent sessions writing to mapping files.
+        """5 parallel hook invocations with independent sessions writing to global mapping.
 
         Each thread uses its own session to avoid crash-recovery interference,
-        but all threads run concurrently to stress-test file locking.
-        Then we verify each session's mapping is valid and all secrets are preserved.
+        but all threads run concurrently to stress-test file locking on the
+        shared global mapping file.
+        Then we verify the global mapping contains all secrets and files are restored.
         """
         tokens = [f"ghp_{''.join(chr(65 + i) * 36)}" for i in range(5)]
         files = []
@@ -728,14 +800,22 @@ class TestParallelSafety:
             assert not errors, f"Errors during concurrent access: {errors}"
             assert all(r for r in results), "Some concurrent invocations failed"
 
-            # Check each session's mapping file is valid
-            for i in range(5):
-                mf = _mapping_file(sids[i])
-                assert os.path.exists(mf), f"Mapping file for session {i} should exist"
-                with open(mf) as f:
-                    mapping = json.load(f)
-                assert tokens[i] in mapping.get("secret_to_placeholder", {}), \
-                    f"Token {tokens[i][:10]}... not found in mapping for session {i}"
+            # Check the global mapping file contains all tokens
+            mf = GLOBAL_MAPPING_PATH
+            assert os.path.exists(mf), "Global mapping file should exist"
+            with open(mf, 'rb') as f:
+                raw = f.read()
+            fernet = _get_fernet()
+            if fernet:
+                try:
+                    mapping = json.loads(fernet.decrypt(raw))
+                except Exception:
+                    mapping = json.loads(raw)
+            else:
+                mapping = json.loads(raw)
+            for i, token in enumerate(tokens):
+                assert token in mapping.get("secret_to_placeholder", {}), \
+                    f"Token {token[:10]}... not found in global mapping"
 
             # All files should be restored to original
             for i, f_path in enumerate(files):
@@ -791,7 +871,8 @@ class TestE2EFlows:
             run_hook("Read", {"file_path": f}, sid, is_post=True)
 
             # PreToolUse Write with placeholder in content
-            ph = _ph("GITHUB_PAT_CLASSIC")
+            ph = _ph_from_mapping(token)
+            assert ph is not None
             new_content = f"# Updated\nTOKEN={ph}\nVERSION=2\n"
             o, c, _ = run_hook("Write", {"file_path": f, "content": new_content}, sid)
             assert c == 0
@@ -818,7 +899,6 @@ class TestE2EFlows:
                 assert fh.read() == orig
 
             # PreToolUse Edit: file gets re-redacted for freshness
-            ph = _ph("GITHUB_PAT_CLASSIC")
             o, c, _ = run_hook("Edit", {
                 "file_path": f,
                 "old_string": "DEBUG=true",
@@ -906,6 +986,106 @@ class TestDebugMode:
             assert r.stderr == "", f"No stderr expected, got: {r.stderr}"
 
             run_hook("Read", {"file_path": f}, sid, is_post=True)
+        finally:
+            os.unlink(f)
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# NEW TESTS: Global Persistent Placeholder Mapping
+# ══════════════════════════════════════════════════════════════════════════
+
+class TestGlobalMapping:
+    def test_deterministic_placeholder(self, sid):
+        """Same secret always produces the same placeholder, even across different invocations."""
+        token = "ghp_" + "J" * 36
+        content = f"TOKEN={token}\n"
+        f1 = _tmp(content)
+        f2 = _tmp(content)
+        try:
+            # First invocation
+            run_hook("Read", {"file_path": f1}, sid)
+            with open(f1) as fh:
+                red1 = fh.read()
+            run_hook("Read", {"file_path": f1}, sid, is_post=True)
+            ph1 = _ph_from_mapping(token)
+            assert ph1 is not None, "Placeholder should exist after first read"
+
+            # Second invocation with a different file but same secret
+            run_hook("Read", {"file_path": f2}, sid)
+            with open(f2) as fh:
+                red2 = fh.read()
+            run_hook("Read", {"file_path": f2}, sid, is_post=True)
+            ph2 = _ph_from_mapping(token)
+            assert ph2 is not None, "Placeholder should exist after second read"
+
+            # Same secret -> same placeholder
+            assert ph1 == ph2, f"Same secret should produce same placeholder: {ph1} != {ph2}"
+            # Both redacted files should contain the same placeholder
+            assert ph1 in red1
+            assert ph1 in red2
+        finally:
+            os.unlink(f1)
+            os.unlink(f2)
+
+    def test_persistent_mapping_survives_session_end(self, sid):
+        """Mapping persists after SessionEnd; a new session can use the same placeholders."""
+        token = "ghp_" + "K" * 36
+        content = f"TOKEN={token}\n"
+        f = _tmp(content)
+        try:
+            # First session: establish mapping
+            run_hook("Read", {"file_path": f}, sid)
+            run_hook("Read", {"file_path": f}, sid, is_post=True)
+            ph_before = _ph_from_mapping(token)
+            assert ph_before is not None, "Placeholder should exist before SessionEnd"
+
+            # Send SessionEnd
+            payload = {"tool_name": "SessionEnd", "tool_input": {}, "session_id": sid, "type": "SessionEnd"}
+            r = subprocess.run(
+                [sys.executable, HOOK_SCRIPT],
+                input=json.dumps(payload),
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            assert r.returncode == 0
+
+            # Mapping should still exist
+            assert os.path.exists(GLOBAL_MAPPING_PATH), "Global mapping should survive SessionEnd"
+            ph_after = _ph_from_mapping(token)
+            assert ph_after == ph_before, "Placeholder should be same after SessionEnd"
+
+            # New session: use a different session_id
+            sid2 = sid + "_new"
+            try:
+                # Write with placeholder from the persisted mapping
+                o, c, _ = run_hook("Write", {"file_path": "/out.py", "content": f"TOKEN={ph_after}\n"}, sid2)
+                assert c == 0 and o is not None
+                assert o["hookSpecificOutput"]["updatedInput"]["content"] == f"TOKEN={token}\n", \
+                    "New session should restore from persisted mapping"
+            finally:
+                cleanup(sid2)
+        finally:
+            os.unlink(f)
+
+    def test_placeholder_format_is_hmac(self, sid):
+        """Placeholder should use HMAC hash format, not counter-based."""
+        token = "ghp_" + "H" * 36
+        content = f"TOKEN={token}\n"
+        f = _tmp(content)
+        try:
+            run_hook("Read", {"file_path": f}, sid)
+            run_hook("Read", {"file_path": f}, sid, is_post=True)
+            ph = _ph_from_mapping(token)
+            assert ph is not None
+            # Should be format like {{GITHUB_PAT_CLASSIC_a1b2c3d4}}
+            assert ph.startswith("{{GITHUB_PAT_CLASSIC_")
+            assert ph.endswith("}}")
+            # The suffix should be a hex string (8 chars), not a counter number
+            suffix = ph[len("{{GITHUB_PAT_CLASSIC_"):-len("}}")]
+            assert len(suffix) == 8, f"HMAC digest should be 8 hex chars, got {len(suffix)}: {suffix}"
+            assert all(c in "0123456789abcdef" for c in suffix), \
+                f"HMAC digest should be hex chars, got: {suffix}"
         finally:
             os.unlink(f)
 
