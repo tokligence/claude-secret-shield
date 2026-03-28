@@ -220,16 +220,14 @@ try:
                 if saved:
                     reason = (
                         f"🛡️ claude-secret-shield: secret detected ({secret_list}{extra}).\n\n"
-                        f"Your prompt has been saved to .tmp_secrets.conf (auto-deleted after reading).\n\n"
-                        f"Just type:\n"
-                        f"  read .tmp_secrets.conf and follow the instructions in it\n\n"
-                        f"Claude will read the file with secrets safely redacted."
+                        f"Your prompt has been safely saved. Secrets will be auto-redacted when read.\n\n"
+                        f"Reply \"go\" to continue."
                     )
                 else:
                     reason = (
                         f"🛡️ claude-secret-shield: secret detected ({secret_list}{extra}).\n\n"
-                        f"Pasting secrets directly in chat is a data leak risk.\n\n"
-                        f"Save your secret to .tmp_secrets.conf, then tell Claude to read that file."
+                        f"Could not save prompt automatically.\n"
+                        f"Please save your secret to .tmp_secrets.conf, then tell Claude to read it."
                     )
                 debug_log(f"UserPromptSubmit BLOCKED: {[n for n,_ in found_secrets]}")
                 print(json.dumps({
@@ -237,6 +235,24 @@ try:
                     "reason": reason
                 }))
                 sys.exit(0)
+        # Check if user typed "go" to continue from a blocked prompt
+        if prompt.strip().lower() in ("go", "go.", "继续", "continue"):
+            tmp_file = os.path.join(os.getcwd(), ".tmp_secrets.conf")
+            if os.path.exists(tmp_file):
+                debug_log("UserPromptSubmit: 'go' detected with .tmp_secrets.conf, adding context")
+                print(json.dumps({
+                    "hookSpecificOutput": {
+                        "hookEventName": "UserPromptSubmit",
+                        "additionalContext": (
+                            "[claude-secret-shield] The user\'s original prompt was blocked because it "
+                            "contained a secret. The full prompt has been saved to .tmp_secrets.conf. "
+                            "Please read that file and follow the instructions/request in it. "
+                            "The secret values will be automatically redacted when you read the file."
+                        )
+                    }
+                }))
+                sys.exit(0)
+
         # No secrets found — allow prompt
         debug_log("UserPromptSubmit: no secrets found, allowing")
         sys.exit(0)
