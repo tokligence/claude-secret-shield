@@ -207,13 +207,13 @@ try:
                 secret_list = ", ".join(f"{n} ({p})" for n, p in found_secrets[:5])
                 extra = f" and {len(found_secrets) - 5} more" if len(found_secrets) > 5 else ""
                 reason = (
-                    f"🛡️ claude-secret-shield: Secret detected in your prompt: {secret_list}{extra}.\n\n"
-                    f"Secrets typed directly in prompts are sent to the API in plain text and CANNOT be redacted.\n\n"
-                    f"Instead, please:\n"
-                    f"  1. Save your secret to a file (e.g. secrets.conf, .env.local, config.ini)\n"
-                    f"  2. Then tell Claude: \"my API key is in secrets.conf\"\n"
-                    f"  3. When Claude reads that file, the secret will be automatically redacted and protected.\n\n"
-                    f"This way your secret never leaves your machine in plain text."
+                    f"🛡️ Message blocked — secret detected: {secret_list}{extra}.\n\n"
+                    f"Pasting secrets directly in chat is a data leak risk.\n\n"
+                    f"Do this instead:\n"
+                    f"  1. Save your secret to a local file (e.g. secrets.conf or .env.local)\n"
+                    f"  2. Tell Claude where the file is: \"my API key is in secrets.conf\"\n"
+                    f"  3. Claude will read the file — the secret is automatically redacted before Claude sees it, and restored when writing back.\n\n"
+                    f"Your secret stays safe on your machine."
                 )
                 debug_log(f"UserPromptSubmit BLOCKED: {[n for n,_ in found_secrets]}")
                 print(json.dumps({
