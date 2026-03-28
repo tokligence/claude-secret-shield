@@ -10,9 +10,11 @@ If you find this useful, please give it a star to help others discover it.
 
 ## Features
 
-- **140 secret patterns** -- OpenAI, Anthropic, AWS, GitHub, Stripe, Slack, database URLs, private keys, JWTs, and 90+ more
-- **36 blocked file types** -- `.env`, `credentials.json`, `id_rsa`, `.pem`, `.p12`, `.pfx`, and more
+- **140+ secret patterns** -- OpenAI, Anthropic, AWS, GitHub, Stripe, Slack, database URLs, private keys, JWTs, and 90+ more
+- **36+ blocked file types** -- `.env`, `credentials.json`, `id_rsa`, `.pem`, `.p12`, `.pfx`, and more
+- **Prompt scanning** -- blocks secrets pasted directly in user prompts before they reach the API
 - **Automatic restore** -- secrets restored to real values when Claude writes code
+- **Auto-gitignore** -- `.tmp_secrets.conf` automatically added to `.gitignore` on first read
 - **Global persistent mapping** -- same secret always produces the same placeholder, across sessions
 - **Encrypted at rest** -- mapping file encrypted with Fernet (AES-128-CBC + HMAC-SHA256)
 - **Parallel-safe** -- `fcntl` file locking for concurrent hook invocations
@@ -22,33 +24,38 @@ If you find this useful, please give it a star to help others discover it.
 - **Atomic writes** -- tempfile + rename prevents file corruption on crash
 - **Crash recovery** -- orphaned backups automatically restored on next invocation
 - **Debug mode** -- `REDACT_DEBUG=1` for troubleshooting
-- **45 E2E tests** -- comprehensive test coverage
+- **221 E2E tests** -- comprehensive test coverage
 
 ## How It Works
 
-Three strategies work together to keep your secrets safe:
+Four strategies work together to keep your secrets safe:
 
 ```
-                        Your Code Files
-                              |
-              +---------------+---------------+
-              |               |               |
-        Layer 1          Layer 2          Layer 3
-       BLOCK IT        REPLACE IT       RESTORE IT
-              |               |               |
-              v               v               v
-     Dangerous files    Secrets in any    Placeholders
-     denied outright    file swapped      swapped back
-     (.env, id_rsa,     with harmless     to real values
-      credentials...)   {{PLACEHOLDER}}   when writing
+  User Prompt                    Your Code Files
+       |                               |
+       v                 +-------------+-------------+
+   Layer 0               |             |             |
+  SCAN PROMPT       Layer 1       Layer 2       Layer 3
+  block if          BLOCK IT     REPLACE IT    RESTORE IT
+  secret found           |             |             |
+       |                 v             v             v
+       v          Dangerous files  Secrets in    Placeholders
+  "Message        denied outright  any file      swapped back
+   blocked"       (.env, id_rsa,   swapped with  to real values
+                   credentials...) {{PLACEHOLDER}} when writing
 ```
+
+**Layer 0 -- Prompt Scanning:** When you paste a secret directly in your prompt,
+the hook detects it and blocks the message before it reaches the API. You'll see
+a guide telling you to save the secret to `.tmp_secrets.conf` instead, where it
+can be safely redacted.
 
 **Layer 1 -- Block List:** Some files should never be read at all. When Claude tries
 to read `.env`, `credentials.json`, `id_rsa`, or any of the 36 blocked file types,
 the hook denies the read entirely. Claude gets an error message suggesting alternatives.
 
 **Layer 2 -- Pattern Redaction:** For every other file, the hook scans the content
-against 108 regex patterns. Any match is replaced with a deterministic placeholder
+against 140+ regex patterns. Any match is replaced with a deterministic placeholder
 like `{{OPENAI_KEY_a1b2c3d4}}`. Claude sees the placeholder, never the real key.
 
 **Layer 3 -- Auto Restore:** When Claude writes or edits a file, the hook
@@ -97,10 +104,11 @@ git clone https://github.com/tokligence/claude-secret-shield.git /tmp/claude-red
 
 ### Hook Lifecycle
 
-The hook registers for three Claude Code events:
+The hook registers for four Claude Code events:
 
 | Hook Event | Tools Matched | Purpose |
 |------------|---------------|---------|
+| `UserPromptSubmit` | (all prompts) | Scan user input for secrets, block if found |
 | `PreToolUse` | Read, Write, Edit, Bash | Intercept before execution |
 | `PostToolUse` | Read, Write, Edit | Restore/cleanup after execution |
 | `SessionEnd` | (all) | Clean up temporary backup files |
@@ -108,6 +116,15 @@ The hook registers for three Claude Code events:
 ### Request Flow
 
 ```
+User submits prompt
+        |
+        v
+  UserPromptSubmit Hook
+        |
+  Secret found? ──yes──> BLOCK + show guide to use .tmp_secrets.conf
+        |
+       no
+        v
 Claude Code issues tool call (Read / Write / Edit / Bash)
         |
         v
@@ -198,7 +215,7 @@ For the complete pattern catalog with prefixes, examples, and selection criteria
 | Git Credentials | 3 | GitHub/GitLab/generic URLs with embedded tokens |
 | Private Keys / Tokens | 2 | PEM private key blocks, JWT tokens |
 | Generic Patterns | 3 | `api_key=...`, `password=...`, base64 secrets in env-like contexts |
-| **Total** | **108** | |
+| **Total** | **140+** | |
 
 ## Security Scope
 
@@ -214,6 +231,8 @@ This is a **Claude Code hook** that prevents Claude from **seeing** your real se
 | Claude reading .env / credentials files | Yes | File blocking (30 file types) |
 | Claude seeing database passwords in connection strings | Yes | Pattern matching (MongoDB, PostgreSQL, MySQL, Redis URLs) |
 | Claude seeing private keys (RSA, Ed25519, etc.) | Yes | PEM header detection + file blocking |
+| Secrets pasted directly in prompts | Yes | UserPromptSubmit hook scans and blocks before API |
+| `.tmp_secrets.conf` accidentally committed | Yes | Auto-added to `.gitignore` on first read |
 | Mapping file stolen from your disk | Yes | Fernet encryption at rest |
 | Same secret getting different placeholders | Yes | HMAC-based deterministic mapping |
 
@@ -226,6 +245,7 @@ This is a **Claude Code hook** that prevents Claude from **seeing** your real se
 | Secrets printed in Bash command output | **Partial** | Redacted in known patterns, but not all output |
 | Root user reading your files | **No** | Root bypasses all file permissions |
 | Memory dump while hook is running | **No** | Secrets are briefly in RAM during redaction |
+| Secrets pasted in user prompts | **Yes** | UserPromptSubmit hook scans and blocks (new in v2) |
 | Prompt injection telling Claude to exfiltrate secrets | **No** | This is an application-level attack, not a file-reading attack |
 | Secrets in binary files (compiled code, images) | **No** | Binary files are skipped |
 | Secrets in formats we don't have patterns for | **No** | Only the 108 built-in + custom patterns are detected |
@@ -310,7 +330,7 @@ Re-running `install.sh` updates upstream patterns without affecting your custom 
     patterns.py                # 108 secret patterns (updated on install)
     custom-patterns.py         # Your custom patterns (never overwritten)
     custom-patterns.example.py # Example custom patterns file
-  settings.json                # Hook registration (PreToolUse + PostToolUse + SessionEnd)
+  settings.json                # Hook registration (UserPromptSubmit + PreToolUse + PostToolUse + SessionEnd)
 ```
 
 ### Runtime files
@@ -346,8 +366,9 @@ Or without pytest:
 python3 test_hook.py
 ```
 
-45 tests cover:
+221 tests cover:
 
+- **Prompt scanning** (secret detection, blocking, truncated previews, safe prompts allowed)
 - Block list enforcement (blocked files, allowed files)
 - Redaction correctness (overlapping patterns, Unicode, binary files, empty files)
 - Hook protocol (malformed input, missing fields, unknown tools)
@@ -371,6 +392,12 @@ python3 test_hook.py
 - The hook exits early when no secrets are found
 
 ## FAQ
+
+**Q: What if I paste an API key directly in my prompt?**
+A: The `UserPromptSubmit` hook detects it and blocks the message. You'll see a guide telling you to save the secret to `.tmp_secrets.conf` first, then tell Claude where the file is. Claude reads the file with secrets auto-redacted.
+
+**Q: What is `.tmp_secrets.conf`?**
+A: It's the recommended file for temporarily storing secrets that you want Claude to use. When Claude reads it, secrets are automatically redacted. The file is auto-added to `.gitignore` on first read so it's never committed.
 
 **Q: Does this work with all Claude Code tools?**
 A: Yes. Read, Write, Edit, and Bash are all intercepted. Other tools pass through unchanged.
