@@ -402,6 +402,11 @@ SECRET_PATTERNS = [
     # PII / PERSONAL DATA
     # ================================================================
 
+    # Bare email addresses with high-value TLDs (.ai, .org, gmail.com) — always PII regardless of context
+    ("EMAIL_AI_DOMAIN", r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9-]+\.ai\b'),
+    ("EMAIL_GMAIL", r'[a-zA-Z0-9._%+-]+@gmail\.com\b'),
+    ("EMAIL_ORG_DOMAIN", r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9-]+\.org\b'),
+
     # Email addresses in config/env assignment context (not in comments, docs, git, mailto)
     ("EMAIL_IN_CONFIG", r'(?i)(?<![a-z])(?:e?mail(?:_(?:user(?:name)?|from|to|address|sender|recipient|account))|smtp_?(?:user(?:name)?|from|sender)|(?:from|to|contact|user|admin|notify|reply)_e?mail|sendgrid_(?:from|to|sender)|mail_(?:from|user(?:name)?|sender|address)|email)["\'\']?\s*[:=]\s*["\'\']?[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}["\'\']?'),
 
