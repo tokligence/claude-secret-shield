@@ -266,6 +266,42 @@ SECRET_PATTERNS = [
     ("TIDB_URL", r'tidb(?:\+[a-z0-9_]+)?://[^\s"\'<>]+:[^\s"\'<>@]+@[^\s"\'<>]+'),
     # ClickHouse
     ("CLICKHOUSE_URL", r'clickhouse(?:\+[a-z0-9_]+)?://[^\s"\'<>]+:[^\s"\'<>@]+@[^\s"\'<>]+'),
+    # DB2
+    ("DB2_URL", r'db2(?:\+[a-z0-9_]+)?://[^\s"\'<>]+:[^\s"\'<>@]+@[^\s"\'<>]+'),
+    # SAP HANA
+    ("HANA_URL", r'hana(?:\+[a-z0-9_]+)?://[^\s"\'<>]+:[^\s"\'<>@]+@[^\s"\'<>]+'),
+    # Firebird
+    ("FIREBIRD_URL", r'firebird(?:\+[a-z0-9_]+)?://[^\s"\'<>]+:[^\s"\'<>@]+@[^\s"\'<>]+'),
+    # SQL Server (sqlserver:// scheme, different from mssql+pyodbc://)
+    ("SQLSERVER_URL", r'sqlserver://[^\s"\'<>]+:[^\s"\'<>@]+@[^\s"\'<>;]+'),
+    # Snowflake
+    ("SNOWFLAKE_URL", r'snowflake://[^\s"\'<>]+:[^\s"\'<>@]+@[^\s"\'<>]+'),
+    # Amazon Redshift
+    ("REDSHIFT_URL", r'redshift(?:\+[a-z0-9_]+)?://[^\s"\'<>]+:[^\s"\'<>@]+@[^\s"\'<>]+'),
+    # Cassandra / ScyllaDB
+    ("CASSANDRA_URL", r'(?:cassandra|scylla)(?:\+[a-z0-9_]+)?://[^\s"\'<>]+:[^\s"\'<>@]+@[^\s"\'<>]+'),
+    # Neo4j / Bolt
+    ("NEO4J_URL", r'(?:neo4j|bolt)(?:\+[a-z]+)?://[^\s"\'<>]+:[^\s"\'<>@]+@[^\s"\'<>]+'),
+    # CouchDB
+    ("COUCHDB_URL", r'couchdb://[^\s"\'<>]+:[^\s"\'<>@]+@[^\s"\'<>]+'),
+    # ArangoDB
+    ("ARANGODB_URL", r'arangodb://[^\s"\'<>]+:[^\s"\'<>@]+@[^\s"\'<>]+'),
+    # AMQP / RabbitMQ
+    ("AMQP_URL", r'amqps?://[^\s"\'<>]+:[^\s"\'<>@]+@[^\s"\'<>]+'),
+    # NATS
+    ("NATS_URL", r'nats://[^\s"\'<>]+:[^\s"\'<>@]+@[^\s"\'<>]+'),
+    # MQTT
+    ("MQTT_URL", r'mqtts?://[^\s"\'<>]+:[^\s"\'<>@]+@[^\s"\'<>]+'),
+    # STOMP
+    ("STOMP_URL", r'stomp://[^\s"\'<>]+:[^\s"\'<>@]+@[^\s"\'<>]+'),
+    # Databricks
+    ("DATABRICKS_URL", r'databricks://[^\s"\'<>]+:[^\s"\'<>@]+@[^\s"\'<>]+'),
+    # FTP / SFTP
+    ("FTP_URL", r's?ftp://[^\s"\'<>]+:[^\s"\'<>@]+@[^\s"\'<>]+'),
+    # LDAP
+    ("LDAP_URL", r'ldaps?://[^\s"\'<>]+:[^\s"\'<>@]+@[^\s"\'<>]+'),
+    # Generic HTTP(S) with user:password@ (catches ES, OpenSearch, CouchDB, ArangoDB, ClickHouse HTTP, etc.)
+    ("HTTP_BASIC_AUTH_URL", r'https?://[a-zA-Z0-9._-]+:[^\s"\'<>@]+@[^\s"\'<>]+'),
     ("REDIS_URL", r'rediss?://[^\s"\'<>]*:[^\s"\'<>@]+@[^\s"\'<>]+'),
     # PlanetScale
     ("PLANETSCALE_PASSWORD", r'pscale_pw_[A-Za-z0-9_-]{43}'),
