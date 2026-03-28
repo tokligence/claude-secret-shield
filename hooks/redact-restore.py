@@ -206,16 +206,31 @@ try:
             if found_secrets:
                 secret_list = ", ".join(f"{n} ({p})" for n, p in found_secrets[:5])
                 extra = f" and {len(found_secrets) - 5} more" if len(found_secrets) > 5 else ""
-                reason = (
-                    f"🛡️ Message blocked — secret detected: {secret_list}{extra}.\n\n"
-                    f"Pasting secrets directly in chat is a data leak risk.\n\n"
-                    f"Do this instead:\n"
-                    f"  1. Save your secret to .tmp_secrets.conf:\n"
-                    f"       echo \"MY_KEY=your-secret-value\" >> .tmp_secrets.conf\n"
-                    f"  2. Tell Claude: \"my API key is in .tmp_secrets.conf\"\n"
-                    f"  3. Claude reads the file — secret is auto-redacted and protected.\n\n"
-                    f"Your secret never leaves your machine."
-                )
+                # Save the full prompt to .tmp_secrets.conf so user can just re-reference it
+                tmp_file = os.path.join(os.getcwd(), ".tmp_secrets.conf")
+                try:
+                    with open(tmp_file, "w") as tf:
+                        tf.write(prompt)
+                    os.chmod(tmp_file, 0o600)
+                    debug_log(f"Saved prompt to {tmp_file}")
+                    saved = True
+                except OSError as e:
+                    debug_log(f"Failed to save prompt: {e}")
+                    saved = False
+                if saved:
+                    reason = (
+                        f"🛡️ claude-secret-shield: secret detected ({secret_list}{extra}).\n\n"
+                        f"Your prompt has been saved to .tmp_secrets.conf (auto-deleted after reading).\n\n"
+                        f"Just type:\n"
+                        f"  read .tmp_secrets.conf and follow the instructions in it\n\n"
+                        f"Claude will read the file with secrets safely redacted."
+                    )
+                else:
+                    reason = (
+                        f"🛡️ claude-secret-shield: secret detected ({secret_list}{extra}).\n\n"
+                        f"Pasting secrets directly in chat is a data leak risk.\n\n"
+                        f"Save your secret to .tmp_secrets.conf, then tell Claude to read that file."
+                    )
                 debug_log(f"UserPromptSubmit BLOCKED: {[n for n,_ in found_secrets]}")
                 print(json.dumps({
                     "decision": "block",
@@ -603,6 +618,13 @@ try:
                             os.utime(file_path, (orig_meta["atime"], orig_meta["mtime"]))
                     except OSError:
                         pass
+                    # Auto-delete .tmp_secrets.conf after reading
+                    if os.path.basename(file_path) == ".tmp_secrets.conf":
+                        try:
+                            os.remove(file_path)
+                            debug_log(f"Auto-deleted {file_path} after read")
+                        except OSError:
+                            pass
                 elif tool_name == "Edit":
                     # After Edit: file has edited content with placeholders.
                     # Replace all placeholders with real values.

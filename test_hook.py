@@ -1130,7 +1130,7 @@ class TestUserPromptSubmit:
         result, code, _ = self._run_prompt_hook("Use this key: sk-proj-abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmn")
         assert code == 0 and result is not None
         assert result["decision"] == "block"
-        assert "message blocked" in result["reason"].lower()
+        assert "secret detected" in result["reason"].lower()
 
     def test_postgres_url_blocked(self):
         result, code, _ = self._run_prompt_hook("Connect to postgres://myuser:s3cretP4ss@db.example.com:5432/mydb")
