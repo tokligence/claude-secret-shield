@@ -195,6 +195,18 @@ class TestBlockList:
         assert o is not None
         assert o["hookSpecificOutput"]["permissionDecision"] == "deny"
 
+    def test_block_aws_credentials(self, sid):
+        o, c, _ = run_hook("Read", {"file_path": "/Users/test/.aws/credentials"}, sid)
+        assert c == 0
+        assert o is not None
+        assert o["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+    def test_block_aws_cli_cache(self, sid):
+        o, c, _ = run_hook("Read", {"file_path": "/Users/test/.aws/cli/cache/1234567890abcdef.json"}, sid)
+        assert c == 0
+        assert o is not None
+        assert o["hookSpecificOutput"]["permissionDecision"] == "deny"
+
     def test_allow_normal(self, sid):
         f = _tmp("print(42)")
         try:
@@ -607,6 +619,13 @@ class TestBashBlocking:
     def test_bash_cat_credentials(self, sid):
         """cat credentials.json should be blocked."""
         o, c, _ = run_hook("Bash", {"command": "cat credentials.json"}, sid)
+        assert c == 0
+        assert o is not None
+        assert o["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+    def test_bash_cat_aws_credentials(self, sid):
+        """cat ~/.aws/credentials should be blocked."""
+        o, c, _ = run_hook("Bash", {"command": "cat ~/.aws/credentials"}, sid)
         assert c == 0
         assert o is not None
         assert o["hookSpecificOutput"]["permissionDecision"] == "deny"
@@ -1151,6 +1170,10 @@ class TestUserPromptSubmit:
         result, code, _ = self._run_prompt_hook("My AWS key is AKIAIOSFODNN7EXAMPLE")
         assert code == 0 and result is not None and result["decision"] == "block"
 
+    def test_aws_session_token_blocked(self):
+        result, code, _ = self._run_prompt_hook('SessionToken="' + "A" * 100 + '"')
+        assert code == 0 and result is not None and result["decision"] == "block"
+
     def test_github_pat_blocked(self):
         result, code, _ = self._run_prompt_hook("Token: ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij")
         assert code == 0 and result is not None and result["decision"] == "block"
@@ -1161,6 +1184,14 @@ class TestUserPromptSubmit:
 
     def test_jwt_blocked(self):
         result, code, _ = self._run_prompt_hook("Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U")
+        assert code == 0 and result is not None and result["decision"] == "block"
+
+    def test_jwt_secret_blocked(self):
+        result, code, _ = self._run_prompt_hook('jwt_secret="' + "A" * 32 + '"')
+        assert code == 0 and result is not None and result["decision"] == "block"
+
+    def test_lark_webhook_blocked(self):
+        result, code, _ = self._run_prompt_hook("Webhook: https://open.larksuite.com/open-apis/bot/v2/hook/" + "A" * 24)
         assert code == 0 and result is not None and result["decision"] == "block"
 
     def test_pem_key_blocked(self):

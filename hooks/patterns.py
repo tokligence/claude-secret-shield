@@ -39,6 +39,10 @@ BLOCKED_FILES = [
     "service-account.json",
     "gcp-credentials.json",
     "aws-credentials",
+    ".aws/credentials",
+    ".aws/config",
+    ".aws/cli/cache",
+    ".aws/sso/cache",
     ".npmrc",            # often contains auth tokens
     ".pypirc",           # often contains auth tokens
     ".docker/config.json",
@@ -105,8 +109,8 @@ SECRET_PATTERNS = [
 
     # AWS
     ("AWS_ACCESS_KEY", r'(?:A3T[A-Z0-9]|AKIA|ASIA|ABIA|ACCA)[A-Z2-7]{16}'),
-    ("AWS_SECRET_KEY", r'(?i)(?:aws)?_?(?:secret)?_?(?:access)?_?key["\']?\s*[:=]\s*["\']?[A-Za-z0-9/+=]{40}["\']?'),
-    ("AWS_SESSION_TOKEN", r'(?i)aws_?session_?token["\']?\s*[:=]\s*["\']?[A-Za-z0-9/+=]{100,}["\']?'),
+    ("AWS_SECRET_KEY", r'(?i)(?:aws_?secret_?access_?key|secret_?access_?key|SecretAccessKey)["\']?\s*[:=]\s*["\']?[A-Za-z0-9/+=]{40}["\']?'),
+    ("AWS_SESSION_TOKEN", r'(?i)(?:aws_?session_?token|aws_?security_?token|session_?token|security_?token|SessionToken)["\']?\s*[:=]\s*["\']?[A-Za-z0-9/+=]{40,}["\']?'),
     # Azure
     ("AZURE_STORAGE_KEY", r'(?i)(?:DefaultEndpointsProtocol|AccountKey)\s*=\s*[A-Za-z0-9+/=]{86,88}'),
     # DigitalOcean
@@ -239,6 +243,9 @@ SECRET_PATTERNS = [
     ("MAILGUN_KEY", r'key-[a-f0-9]{32}'),
     # Telegram
     ("TELEGRAM_BOT_TOKEN", r'\d{8,10}:[A-Za-z0-9_-]{35}'),
+    # Lark / Feishu group bot webhooks
+    ("LARK_WEBHOOK", r'https://(?:open\.larksuite\.com|open\.feishu\.cn)/open-apis/bot/v2/hook/[A-Za-z0-9_-]{20,}'),
+    ("LARK_WEBHOOK_SECRET", r'(?i)(?:lark|feishu)[_-]?(?:webhook[_-]?)?secret["\']?\s*[:=]\s*["\']?[A-Za-z0-9+/=_-]{16,}["\']?'),
     # Microsoft Teams webhook
     ("TEAMS_WEBHOOK", r'https://[a-z0-9-]+\.webhook\.office\.com/webhookb2/[a-f0-9-]{36}@[a-f0-9-]{36}/IncomingWebhook/[a-f0-9]{32}/[a-f0-9-]{36}'),
     # Brevo/Sendinblue (March 2026)
@@ -303,6 +310,7 @@ SECRET_PATTERNS = [
     # Generic HTTP(S) with user:password@ (catches ES, OpenSearch, CouchDB, ArangoDB, ClickHouse HTTP, etc.)
     ("HTTP_BASIC_AUTH_URL", r'https?://[a-zA-Z0-9._-]+:[^\s"\'<>@]+@[^\s"\'<>]+'),
     ("REDIS_URL", r'rediss?://[^\s"\'<>]*:[^\s"\'<>@]+@[^\s"\'<>]+'),
+    ("REDIS_AUTH_TOKEN", r'(?i)(?:redis[_-]?(?:auth[_-]?)?token|requirepass)["\']?\s*[:=]\s*["\']?[A-Za-z0-9+/=_-]{16,}["\']?'),
     # PlanetScale
     ("PLANETSCALE_PASSWORD", r'pscale_pw_[A-Za-z0-9_-]{43}'),
     ("PLANETSCALE_TOKEN", r'pscale_tkn_[A-Za-z0-9_-]{43}'),
@@ -397,6 +405,7 @@ SECRET_PATTERNS = [
     ("PRIVATE_KEY_BLOCK", r'-----BEGIN (?:RSA |DSA |EC |OPENSSH )?PRIVATE KEY-----'),
     # JWT tokens
     ("JWT_TOKEN", r'eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}'),
+    ("JWT_SECRET", r'(?i)jwt[_-]?secret["\']?\s*[:=]\s*["\']?[A-Za-z0-9+/=_-]{24,}["\']?'),
 
     # ================================================================
     # PII / PERSONAL DATA

@@ -2,11 +2,11 @@
 
 > Claude Secret Shield — Complete pattern catalog
 >
-> 140 detection patterns + 36 blocked file types
+> 145 detection patterns + 40 blocked file types
 
 ---
 
-## Blocked Files (36 types)
+## Blocked Files (40 types)
 
 These files are blocked from being read by Claude entirely:
 
@@ -15,7 +15,7 @@ These files are blocked from being read by Claude entirely:
 | Environment | `.env`, `.env.local`, `.env.production`, `.env.staging`, `.env.development`, `.env.test`, `.env.staging.local`, `.env.production.local` |
 | Credentials | `credential.json`, `credential.enc`, `credentials.json`, `secrets.yaml`, `secrets.json`, `secrets.toml`, `secret.key`, `token.json`, `oauth-credentials.json` |
 | SSH/Crypto | `id_rsa`, `id_ed25519`, `id_ecdsa`, `id_dsa`, `.pem`, `.p12`, `.pfx`, `keystore.jks`, `.private` |
-| Cloud | `service-account.json`, `gcp-credentials.json`, `aws-credentials`, `application-default-credentials.json`, `.kaggle/kaggle.json` |
+| Cloud | `service-account.json`, `gcp-credentials.json`, `aws-credentials`, `.aws/credentials`, `.aws/config`, `.aws/cli/cache`, `.aws/sso/cache`, `application-default-credentials.json`, `.kaggle/kaggle.json` |
 | Package Registries | `.npmrc`, `.pypirc` |
 | Other | `.docker/config.json`, `.git-credentials`, `.netrc` |
 
@@ -50,8 +50,8 @@ These files are blocked from being read by Claude entirely:
 | Pattern | Prefix | Provider |
 |---------|--------|----------|
 | AWS_ACCESS_KEY | `AKIA` / `ASIA` | AWS |
-| AWS_SECRET_KEY | context-based | AWS |
-| AWS_SESSION_TOKEN | context-based | AWS |
+| AWS_SECRET_KEY | context-based (`SecretAccessKey`) | AWS |
+| AWS_SESSION_TOKEN | context-based (`SessionToken`) | AWS |
 | AZURE_STORAGE_KEY | `AccountKey=` | Azure |
 | AZURE_AD_SECRET | `~` + context | Azure AD |
 | AZURE_SQL_CONN | `Password=` in conn string | Azure SQL |
@@ -121,7 +121,7 @@ These files are blocked from being read by Claude entirely:
 | RAZORPAY_KEY | `rzp_live_` / `rzp_test_` | Razorpay |
 | PLAID_TOKEN | `access-sandbox-` etc. | Plaid |
 
-### Communication / Messaging (15 patterns)
+### Communication / Messaging (17 patterns)
 
 | Pattern | Prefix | Provider |
 |---------|--------|----------|
@@ -137,11 +137,13 @@ These files are blocked from being read by Claude entirely:
 | MAILCHIMP_KEY | hex + `-us` | Mailchimp |
 | MAILGUN_KEY | `key-` | Mailgun |
 | TELEGRAM_BOT_TOKEN | digits + `:` | Telegram |
+| LARK_WEBHOOK | `open.larksuite.com` / `open.feishu.cn` | Lark / Feishu |
+| LARK_WEBHOOK_SECRET | context-based | Lark / Feishu |
 | TEAMS_WEBHOOK | `webhook.office.com` | MS Teams |
 | INTERCOM_TOKEN | `dG9rO` (base64 "tok:") | Intercom |
 | BREVO_KEY | `xkeysib-` | Brevo/Sendinblue |
 
-### Database / Storage (26 patterns)
+### Database / Storage (27 patterns)
 
 | Pattern | Format | Provider |
 |---------|--------|----------|
@@ -149,6 +151,7 @@ These files are blocked from being read by Claude entirely:
 | POSTGRES_URL | `postgresql://user:pass@host` | PostgreSQL |
 | MYSQL_URL | `mysql://user:pass@host` | MySQL |
 | REDIS_URL | `redis://:pass@host` | Redis |
+| REDIS_AUTH_TOKEN | context-based | Redis |
 | PLANETSCALE_PASSWORD | `pscale_pw_` | PlanetScale |
 | PLANETSCALE_TOKEN | `pscale_tkn_` | PlanetScale |
 | PLANETSCALE_OAUTH | `pscale_oauth_` | PlanetScale |
@@ -200,12 +203,13 @@ These files are blocked from being read by Claude entirely:
 | CLOUDFLARE_API_TOKEN | `v1.0-` | Cloudflare |
 | ATLASSIAN_TOKEN | `ATATT` | Atlassian |
 
-### Private Keys / Tokens (5 patterns)
+### Private Keys / Tokens (6 patterns)
 
 | Pattern | Format | What |
 |---------|--------|------|
 | PRIVATE_KEY_BLOCK | `-----BEGIN...PRIVATE KEY-----` | PEM private key header |
 | JWT_TOKEN | `eyJ...eyJ...` | JSON Web Token (3 parts) |
+| JWT_SECRET | context-based | JWT shared secret |
 | GIT_URL_GITHUB_PAT | `https://user:ghp_@github.com` | GitHub PAT in Git URL |
 | GIT_URL_GITLAB_PAT | `https://user:glpat-@gitlab.com` | GitLab PAT in Git URL |
 | GIT_URL_GENERIC | `https://user:token@host` | Generic token in Git URL |

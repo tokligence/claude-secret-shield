@@ -105,8 +105,8 @@ PATTERN_TEST_CASES = [
     # CLOUD PROVIDERS
     # ================================================================
     ("AWS_ACCESS_KEY", "AKIAIOSFODNN7EXAMPLE"),
-    ("AWS_SECRET_KEY", 'aws_secret_key = "' + "A" * 40 + '"'),
-    ("AWS_SESSION_TOKEN", 'aws_session_token = "' + "A" * 100 + '"'),
+    ("AWS_SECRET_KEY", 'SecretAccessKey = "' + "A" * 40 + '"'),
+    ("AWS_SESSION_TOKEN", '"SessionToken": "' + "A" * 100 + '"'),
     ("AZURE_STORAGE_KEY", "DefaultEndpointsProtocol = " + "A" * 86),
     ("DIGITALOCEAN_PAT", "dop_v1_" + "a" * 64),
     ("DIGITALOCEAN_OAUTH", "doo_v1_" + "a" * 64),
@@ -189,6 +189,8 @@ PATTERN_TEST_CASES = [
     ("MAILCHIMP_KEY", "a" * 32 + "-us1"),
     ("MAILGUN_KEY", "key-" + "a" * 32),
     ("TELEGRAM_BOT_TOKEN", "123456789:" + "A" * 35),
+    ("LARK_WEBHOOK", "https://open.larksuite.com/open-apis/bot/v2/hook/" + "A" * 24),
+    ("LARK_WEBHOOK_SECRET", 'lark_webhook_secret = "' + "A" * 24 + '"'),
     ("TEAMS_WEBHOOK", "https://example-org.webhook.office.com/webhookb2/" + "a" * 8 + "-" + "b" * 4 + "-" + "c" * 4 + "-" + "d" * 4 + "-" + "e" * 12 + "@" + "f" * 8 + "-" + "a" * 4 + "-" + "b" * 4 + "-" + "c" * 4 + "-" + "d" * 12 + "/IncomingWebhook/" + "a" * 32 + "/" + "e" * 8 + "-" + "f" * 4 + "-" + "a" * 4 + "-" + "b" * 4 + "-" + "c" * 12),
     ("BREVO_KEY", "xkeysib-" + "a" * 64 + "-" + "A" * 16),
     ("INTERCOM_TOKEN", "dG9rO" + "A" * 36 + "="),
@@ -200,6 +202,7 @@ PATTERN_TEST_CASES = [
     ("POSTGRES_URL", "postgresql://user:fakepassword123@db.example.com:5432/mydb"),
     ("MYSQL_URL", "mysql://root:fakepassword123@mysql.example.com:3306/testdb"),
     ("REDIS_URL", "redis://:fakepassword123@redis.example.com:6379/0"),
+    ("REDIS_AUTH_TOKEN", 'redis_auth_token = "' + "A" * 24 + '"'),
     ("MSSQL_URL", "mssql+pyodbc://sa:fakepassword123@sqlserver.example.com/mydb?driver=ODBC+Driver+17"),
     ("ORACLE_URL", "oracle+cx_oracle://admin:fakepassword123@oracle.example.com:1521/ORCL"),
     ("COCKROACHDB_URL", "cockroachdb://root:fakepassword123@cockroach.example.com:26257/defaultdb"),
@@ -288,6 +291,7 @@ PATTERN_TEST_CASES = [
     # ================================================================
     ("PRIVATE_KEY_BLOCK", "-----BEGIN RSA PRIVATE KEY-----"),
     ("JWT_TOKEN", "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.AAAAAAAAAAAAAAAAAAAAAAAAA"),
+    ("JWT_SECRET", 'jwt_secret = "' + "A" * 32 + '"'),
 
     # ================================================================
     # GENERIC PATTERNS
