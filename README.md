@@ -20,9 +20,11 @@ Restart Claude Code after installing. **Prerequisites:** Python 3.6+, `jq`. Opti
 
 ## Features
 
-- **164 secret patterns** -- OpenAI, Anthropic, AWS, GitHub, Stripe, Slack, database URLs, private keys, JWTs, and 90+ more
-- **36+ blocked file types** -- `.env`, `credentials.json`, `id_rsa`, `.pem`, `.p12`, `.pfx`, and more
+- **183 secret patterns** -- OpenAI, Anthropic, AWS, GitHub, Stripe, Slack, database URLs, private keys, JWTs, Web3 wallets, and 100+ more
+- **Web3 wallet protection** -- ETH/EVM private keys, BIP39 mnemonics, Bitcoin WIF, Solana, Infura/Alchemy/Etherscan URLs
+- **48 blocked file types** -- `.env`, `credentials.json`, `id_rsa`, `.pem`, `hardhat.config.*`, `mnemonic.txt`, and more
 - **Prompt scanning** -- blocks secrets pasted directly in user prompts before they reach the API
+- **Temporary bypass** -- `pass` / `pass N` / `pass off` to allow non-secret values (e.g., tx hashes) through
 - **Automatic restore** -- secrets restored to real values when Claude writes code
 - **Auto-gitignore** -- `.tmp_secrets.conf` automatically added to `.gitignore` on first read
 - **Global persistent mapping** -- same secret always produces the same placeholder, across sessions
@@ -34,7 +36,7 @@ Restart Claude Code after installing. **Prerequisites:** Python 3.6+, `jq`. Opti
 - **Atomic writes** -- tempfile + rename prevents file corruption on crash
 - **Crash recovery** -- orphaned backups automatically restored on next invocation
 - **Debug mode** -- `REDACT_DEBUG=1` for troubleshooting
-- **245 E2E tests** -- comprehensive test coverage
+- **346 E2E tests** -- comprehensive test coverage
 
 ## How It Works
 
@@ -57,15 +59,18 @@ Four strategies work together to keep your secrets safe:
 
 **Layer 0 -- Prompt Scanning:** When you paste a secret directly in your prompt,
 the hook detects it, saves your full prompt to `.tmp_secrets.conf`, and blocks
-the message. Just type: `read .tmp_secrets.conf and follow the instructions in it`.
-Claude reads the file with secrets auto-redacted, and the file is auto-deleted after reading.
+the message. You have several options:
+- `go` — continue with secrets auto-redacted (Claude reads them as placeholders)
+- `pass` — allow this prompt as-is (e.g., the value is a tx hash, not a secret)
+- `pass N` — bypass scanning for this + next N-1 prompts
+- `pass off` — disable prompt scanning for this session
 
 **Layer 1 -- Block List:** Some files should never be read at all. When Claude tries
-to read `.env`, `credentials.json`, `id_rsa`, or any of the 36 blocked file types,
+to read `.env`, `credentials.json`, `id_rsa`, or any of the 48 blocked file types,
 the hook denies the read entirely. Claude gets an error message suggesting alternatives.
 
 **Layer 2 -- Pattern Redaction:** For every other file, the hook scans the content
-against 164 regex patterns. Any match is replaced with a deterministic placeholder
+against 183 regex patterns. Any match is replaced with a deterministic placeholder
 like `{{OPENAI_KEY_a1b2c3d4}}`. Claude sees the placeholder, never the real key.
 
 **Layer 3 -- Auto Restore:** When Claude writes or edits a file, the hook
@@ -77,27 +82,17 @@ always has real credentials. Claude never knows the difference.
 ### Install (one command)
 
 ```bash
-git clone https://github.com/tokligence/claude-secret-shield.git /tmp/claude-redact-install && bash /tmp/claude-redact-install/install.sh && rm -rf /tmp/claude-redact-install
+curl -fsSL https://raw.githubusercontent.com/tokligence/claude-secret-shield/main/install.sh | sh
 ```
-
-Or tell Claude Code: *"Install secret redaction from https://github.com/tokligence/claude-secret-shield"*
 
 Restart Claude Code after installing.
 
-**Prerequisites:** Python 3.6+, `jq`
-
-**Recommended:** Install `cryptography` for encrypted mapping storage:
-
-```bash
-pip3 install cryptography
-```
-
-Without it, the mapping file is stored as plaintext (permission-restricted but not encrypted).
+**Prerequisites:** Python 3.6+, `jq`. Optional: `pip3 install cryptography` for encrypted mapping storage.
 
 ### Uninstall
 
 ```bash
-git clone https://github.com/tokligence/claude-secret-shield.git /tmp/claude-redact-install && bash /tmp/claude-redact-install/uninstall.sh && rm -rf /tmp/claude-redact-install
+curl -fsSL https://raw.githubusercontent.com/tokligence/claude-secret-shield/main/uninstall.sh | sh
 ```
 
 ### Verify it works
@@ -188,7 +183,7 @@ If a Read is denied or redirected, Claude cannot Write or Edit that file later (
 with "file has not been read yet"). The solution:
 
 1. `PreToolUse` fires for `Read(/path/to/config.py)`
-2. Hook reads the file, scans against 140 patterns
+2. Hook reads the file, scans against 183 patterns
 3. Hook backs up the original to `/tmp/.claude-backup-{session}/`
 4. Hook overwrites the file in-place with redacted content (preserving timestamps)
 5. Hook exits 0 (allow) -- Claude reads the redacted file normally
@@ -209,7 +204,7 @@ backups automatically. No manual intervention needed.
 For the complete pattern catalog with prefixes, examples, and selection criteria, see [docs/PATTERNS.md](docs/PATTERNS.md).
 
 
-140 patterns organized by category:
+183 patterns organized by category:
 
 | Category | Count | Examples |
 |----------|------:|---------|
@@ -227,7 +222,8 @@ For the complete pattern catalog with prefixes, examples, and selection criteria
 | Git Credentials | 3 | GitHub/GitLab/generic URLs with embedded tokens |
 | Private Keys / Tokens | 2 | PEM private key blocks, JWT tokens |
 | Generic Patterns | 3 | `api_key=...`, `password=...`, base64 secrets in env-like contexts |
-| **Total** | **164** | |
+| Web3 / Crypto | 11 | Ethereum private keys, BIP39 mnemonics, Bitcoin WIF, Solana, Infura, Alchemy, Etherscan, Ankr, QuickNode |
+| **Total** | **183** | |
 
 ## Security Scope
 
@@ -239,8 +235,8 @@ This is a **Claude Code hook** that prevents Claude from **seeing** your real se
 
 | Threat | Protected? | How |
 |--------|-----------|-----|
-| Claude seeing your API keys in code | Yes | Pattern-based redaction (164 patterns) |
-| Claude reading .env / credentials files | Yes | File blocking (30 file types) |
+| Claude seeing your API keys in code | Yes | Pattern-based redaction (183 patterns) |
+| Claude reading .env / credentials files | Yes | File blocking (48 file types) |
 | Claude seeing database passwords in connection strings | Yes | Pattern matching (MongoDB, PostgreSQL, MySQL, Redis URLs) |
 | Claude seeing private keys (RSA, Ed25519, etc.) | Yes | PEM header detection + file blocking |
 | Secrets pasted directly in prompts | Yes | UserPromptSubmit hook scans and blocks before API |
@@ -260,7 +256,7 @@ This is a **Claude Code hook** that prevents Claude from **seeing** your real se
 | Secrets pasted in user prompts | **Yes** | UserPromptSubmit hook scans and blocks (new in v2) |
 | Prompt injection telling Claude to exfiltrate secrets | **No** | This is an application-level attack, not a file-reading attack |
 | Secrets in binary files (compiled code, images) | **No** | Binary files are skipped |
-| Secrets in formats we don't have patterns for | **No** | Only the 108 built-in + custom patterns are detected |
+| Secrets in formats we don't have patterns for | **No** | Only the 183 built-in + custom patterns are detected |
 
 ### Bottom line
 
@@ -339,7 +335,7 @@ Re-running `install.sh` updates upstream patterns without affecting your custom 
 ~/.claude/
   hooks/
     redact-restore.py          # Main hook script
-    patterns.py                # 108 secret patterns (updated on install)
+    patterns.py                # 183 secret patterns (updated on install)
     custom-patterns.py         # Your custom patterns (never overwritten)
     custom-patterns.example.py # Example custom patterns file
   settings.json                # Hook registration (UserPromptSubmit + PreToolUse + PostToolUse + SessionEnd)
@@ -378,9 +374,9 @@ Or without pytest:
 python3 test_hook.py
 ```
 
-245 tests cover:
+346 tests cover:
 
-- **Prompt scanning** (secret detection, blocking, truncated previews, safe prompts allowed)
+- **Prompt scanning** (secret detection, blocking, `go`/`pass`/`pass N`/`pass off` bypass, truncated previews)
 - Block list enforcement (blocked files, allowed files)
 - Redaction correctness (overlapping patterns, Unicode, binary files, empty files)
 - Hook protocol (malformed input, missing fields, unknown tools)
@@ -392,6 +388,9 @@ python3 test_hook.py
 - Parallel safety (concurrent mapping access from multiple processes)
 - Crash recovery (orphaned backup restoration)
 - Full E2E flows (Read -> Edit -> Write cycles)
+- Web3 patterns (wallet keys, mnemonics, RPC URLs, blocked config files)
+- Bare hex threshold suppression (auto-suppress when >3 per file)
+- Pass command (bypass, counter, cap, session isolation, edge cases)
 - Encrypted mapping (Fernet encrypt/decrypt round-trip)
 
 ## Performance
@@ -406,10 +405,20 @@ python3 test_hook.py
 ## FAQ
 
 **Q: What if I paste an API key directly in my prompt?**
-A: The hook automatically saves your prompt to `.tmp_secrets.conf` and blocks the message. Just type: `read .tmp_secrets.conf and follow the instructions in it`. Claude reads the file with secrets safely redacted, then the file is auto-deleted. No manual copy-paste needed.
+A: The hook blocks the message and shows your options:
+- `go` — continue with secrets auto-redacted (safest, Claude reads them as placeholders)
+- `pass` — allow this prompt as-is (use when the detected value isn't actually a secret)
+- `pass N` — bypass scanning for this and the next N-1 prompts
+- `pass off` — disable prompt scanning for this session (file scanning stays on)
+
+**Q: Why was my transaction hash / bytes32 value blocked?**
+A: The bare `0x` + 64 hex catch-all pattern (`HEX_CREDENTIAL`) intentionally matches all 64-char hex strings to prevent private key leaks. If you're working with tx hashes, use `pass` or `pass N` to temporarily bypass. In files, bare hex matches are auto-suppressed when more than 3 are found in a single file.
 
 **Q: What is `.tmp_secrets.conf`?**
 A: It's the recommended file for temporarily storing secrets that you want Claude to use. When Claude reads it, secrets are automatically redacted. The file is auto-added to `.gitignore` on first read so it's never committed.
+
+**Q: I'm a Web3 developer. What's protected?**
+A: ETH/EVM private keys (context-based: `private_key = "0x..."`), BIP39 mnemonics, Bitcoin WIF keys, Solana keypairs, Infura/Alchemy/Etherscan/Ankr/QuickNode API keys and RPC URLs (including WebSocket `wss://`). Config files like `hardhat.config.js`, `truffle-config.js`, `foundry.toml`, and `mnemonic.txt` are blocked entirely.
 
 **Q: Does this work with all Claude Code tools?**
 A: Yes. Read, Write, Edit, and Bash are all intercepted. Other tools pass through unchanged.

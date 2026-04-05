@@ -21,6 +21,7 @@ curl -fsSL https://raw.githubusercontent.com/tokligence/claude-secret-shield/mai
 ## 功能特性
 
 - **183 种秘密模式** -- 涵盖 OpenAI、Anthropic、AWS、GitHub、Stripe、Slack、数据库连接串、私钥、JWT、Web3 钱包等 100+ 种类型
+- **Web3 钱包保护** -- ETH/EVM 私钥、BIP39 助记词、比特币 WIF、Solana、Infura/Alchemy/Etherscan RPC URL
 - **48 种文件类型拦截** -- `.env`、`credentials.json`、`id_rsa`、`.pem`、`.p12`、`.pfx` 等
 - **用户输入扫描** -- 在 prompt 中粘贴秘密时自动拦截，防止发送到 API
 - **自动还原** -- Claude 写入代码时，占位符自动还原为真实值
@@ -34,7 +35,7 @@ curl -fsSL https://raw.githubusercontent.com/tokligence/claude-secret-shield/mai
 - **原子写入** -- 使用 tempfile + rename，崩溃时不会损坏文件
 - **崩溃恢复** -- 遗留的备份文件在下次调用时自动恢复
 - **调试模式** -- 设置 `REDACT_DEBUG=1` 进行排查
-- **245 个端���端测试** -- 全面的测试覆盖
+- **346 个端���端测试** -- 全面的测试覆盖
 
 ## 工作原理
 
