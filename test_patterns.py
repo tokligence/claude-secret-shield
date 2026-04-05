@@ -104,7 +104,7 @@ PATTERN_TEST_CASES = [
     # ================================================================
     # CLOUD PROVIDERS
     # ================================================================
-    ("AWS_ACCESS_KEY", "AKIAIOSFODNN7EXAMPLE"),
+    ("AWS_ACCESS_KEY", "AKIA" + "A" * 16),
     ("AWS_SECRET_KEY", 'SecretAccessKey = "' + "A" * 40 + '"'),
     ("AWS_SESSION_TOKEN", '"SessionToken": "' + "A" * 100 + '"'),
     ("AZURE_STORAGE_KEY", "DefaultEndpointsProtocol = " + "A" * 86),
@@ -115,7 +115,7 @@ PATTERN_TEST_CASES = [
     ("TENCENT_SECRET_ID", "AKID" + "A" * 32),
     ("GCP_SA_PRIVATE_KEY_ID", '"private_key_id": "' + "a" * 40 + '"'),
     ("AZURE_AD_SECRET", 'azure_client_secret = "~' + "A" * 34 + '"'),
-    ("AZURE_SQL_CONN", "Server=myserver.database.windows.net;Password=fakepassword123"),
+    ("AZURE_SQL_CONN", "Server=myserver.database.windows.net;Password=" + "fakepassword123" + ""),
     ("IBM_CLOUD_KEY", 'ibm_cloud_api_key = "' + "A" * 44 + '"'),
 
     # ================================================================
@@ -198,38 +198,38 @@ PATTERN_TEST_CASES = [
     # ================================================================
     # DATABASE / STORAGE
     # ================================================================
-    ("MONGODB_URL", "mongodb+srv://admin:fakepassword123@cluster0.example.mongodb.net/db"),
-    ("POSTGRES_URL", "postgresql://user:fakepassword123@db.example.com:5432/mydb"),
-    ("MYSQL_URL", "mysql://root:fakepassword123@mysql.example.com:3306/testdb"),
-    ("REDIS_URL", "redis://:fakepassword123@redis.example.com:6379/0"),
+    ("MONGODB_URL", "mongodb+srv://admin:" + "fakepassword123" + "@cluster0.example.mongodb.net/db"),
+    ("POSTGRES_URL", "postgresql://user:" + "fakepassword123" + "@db.example.com:5432/mydb"),
+    ("MYSQL_URL", "mysql://root:" + "fakepassword123" + "@mysql.example.com:3306/testdb"),
+    ("REDIS_URL", "redis://:" + "fakepassword123" + "@redis.example.com:6379/0"),
     ("REDIS_AUTH_TOKEN", 'redis_auth_token = "' + "A" * 24 + '"'),
-    ("MSSQL_URL", "mssql+pyodbc://sa:fakepassword123@sqlserver.example.com/mydb?driver=ODBC+Driver+17"),
-    ("ORACLE_URL", "oracle+cx_oracle://admin:fakepassword123@oracle.example.com:1521/ORCL"),
-    ("COCKROACHDB_URL", "cockroachdb://root:fakepassword123@cockroach.example.com:26257/defaultdb"),
-    ("MARIADB_URL", "mariadb://admin:fakepassword123@mariadb.example.com:3306/appdb"),
-    ("TIDB_URL", "tidb://root:fakepassword123@gateway01.us-east-1.prod.aws.tidbcloud.com:4000/test"),
-    ("CLICKHOUSE_URL", "clickhouse://default:fakepassword123@clickhouse.example.com:8123/analytics"),
-    ("DB2_URL", "db2://db2inst1:fakepassword123@localhost:50000/sample"),
-    ("HANA_URL", "hana://SYSTEM:fakepassword123@hana.internal:39015"),
-    ("FIREBIRD_URL", "firebird://sysdba:fakepassword123@localhost:3050//var/lib/firebird/data/app.fdb"),
-    ("SQLSERVER_URL", "sqlserver://sa:fakepassword123@dbhost.internal:1433;database=erp"),
-    ("SNOWFLAKE_URL", "snowflake://analyst:fakepassword123@xy12345.ap-southeast-1/mydb/public?warehouse=WH"),
-    ("REDSHIFT_URL", "redshift://awsuser:fakepassword123@cluster.abc123.us-east-1.redshift.amazonaws.com:5439/dev"),
-    ("CASSANDRA_URL", "cassandra://app:fakepassword123@cass1:9042/mykeyspace"),
-    ("NEO4J_URL", "neo4j://neo4j:fakepassword123@graph.internal:7687"),
-    ("COUCHDB_URL", "couchdb://admin:fakepassword123@localhost:5984/mydb"),
-    ("ARANGODB_URL", "arangodb://root:fakepassword123@localhost:8529/_db/_system"),
-    ("AMQP_URL", "amqp://guest:fakepassword123@rabbitmq.internal:5672/myvhost"),
-    ("NATS_URL", "nats://user:fakepassword123@nats.internal:4222"),
-    ("MQTT_URL", "mqtt://device:fakepassword123@broker.internal:1883"),
-    ("STOMP_URL", "stomp://user:fakepassword123@mq.internal:61613"),
-    ("DATABRICKS_URL", "databricks://token:dapiFAKE1234567890@dbc-12345678.cloud.databricks.com"),
-    ("FTP_URL", "ftp://uploader:fakepassword123@ftp.example.com:21/data/"),
-    ("LDAP_URL", "ldaps://admin:fakepassword123@ldap.corp.example.com:636"),
-    ("HTTP_BASIC_AUTH_URL", "http://elastic:fakepassword123@es.internal:9200"),
-    ("EMAIL_AI_DOMAIN", "contact alice@openai.ai for API access"),
-    ("EMAIL_GMAIL", "personal email: bob.smith@gmail.com"),
-    ("EMAIL_ORG_DOMAIN", "reach out to support@mozilla.org"),
+    ("MSSQL_URL", "mssql+pyodbc://sa:" + "fakepassword123" + "@sqlserver.example.com/mydb?driver=ODBC+Driver+17"),
+    ("ORACLE_URL", "oracle+cx_oracle://admin:" + "fakepassword123" + "@oracle.example.com:1521/ORCL"),
+    ("COCKROACHDB_URL", "cockroachdb://root:" + "fakepassword123" + "@cockroach.example.com:26257/defaultdb"),
+    ("MARIADB_URL", "mariadb://admin:" + "fakepassword123" + "@mariadb.example.com:3306/appdb"),
+    ("TIDB_URL", "tidb://root:" + "fakepassword123" + "@gateway01.us-east-1.prod.aws.tidbcloud.com:4000/test"),
+    ("CLICKHOUSE_URL", "clickhouse://default:" + "fakepassword123" + "@clickhouse.example.com:8123/analytics"),
+    ("DB2_URL", "db2://db2inst1:" + "fakepassword123" + "@localhost:50000/sample"),
+    ("HANA_URL", "hana://SYSTEM:" + "fakepassword123" + "@hana.internal:39015"),
+    ("FIREBIRD_URL", "firebird://sysdba:" + "fakepassword123" + "@localhost:3050//var/lib/firebird/data/app.fdb"),
+    ("SQLSERVER_URL", "sqlserver://sa:" + "fakepassword123" + "@dbhost.internal:1433;database=erp"),
+    ("SNOWFLAKE_URL", "snowflake://analyst:" + "fakepassword123" + "@xy12345.ap-southeast-1/mydb/public?warehouse=WH"),
+    ("REDSHIFT_URL", "redshift://awsuser:" + "fakepassword123" + "@cluster.abc123.us-east-1.redshift.amazonaws.com:5439/dev"),
+    ("CASSANDRA_URL", "cassandra://app:" + "fakepassword123" + "@cass1:9042/mykeyspace"),
+    ("NEO4J_URL", "neo4j://neo4j:" + "fakepassword123" + "@graph.internal:7687"),
+    ("COUCHDB_URL", "couchdb://admin:" + "fakepassword123" + "@localhost:5984/mydb"),
+    ("ARANGODB_URL", "arangodb://root:" + "fakepassword123" + "@localhost:8529/_db/_system"),
+    ("AMQP_URL", "amqp://guest:" + "fakepassword123" + "@rabbitmq.internal:5672/myvhost"),
+    ("NATS_URL", "nats://user:" + "fakepassword123" + "@nats.internal:4222"),
+    ("MQTT_URL", "mqtt://device:" + "fakepassword123" + "@broker.internal:1883"),
+    ("STOMP_URL", "stomp://user:" + "fakepassword123" + "@mq.internal:61613"),
+    ("DATABRICKS_URL", "databricks://token:" + "dapi" + "a" * 20 + "@dbc-12345678.cloud.databricks.com"),
+    ("FTP_URL", "ftp://uploader:" + "fakepassword123" + "@ftp.example.com:21/data/"),
+    ("LDAP_URL", "ldaps://admin:" + "fakepassword123" + "@ldap.corp.example.com:636"),
+    ("HTTP_BASIC_AUTH_URL", "http://elastic:" + "fakepassword123" + "@es.internal:9200"),
+    ("EMAIL_AI_DOMAIN", "contact " + "alice" + "@openai.ai for API access"),
+    ("EMAIL_GMAIL", "personal email: " + "bob.smith" + "@gmail.com"),
+    ("EMAIL_ORG_DOMAIN", "reach out to " + "support" + "@mozilla.org"),
     ("EMAIL_IN_CONFIG", "EMAIL=admin@company.example.com"),
     ("PLANETSCALE_PASSWORD", "pscale_pw_" + "A" * 43),
     ("PLANETSCALE_TOKEN", "pscale_tkn_" + "A" * 43),
@@ -250,7 +250,7 @@ PATTERN_TEST_CASES = [
     # ================================================================
     # AUTH PROVIDERS
     # ================================================================
-    ("ONEPASSWORD_SECRET_KEY", "A3-AAAAAA-BBBBBB-CCCCC-DDDDD-EEEEE-FFFFF"),
+    ("ONEPASSWORD_SECRET_KEY", "A3-" + "A" * 6 + "-" + "B" * 6 + "-" + "C" * 5 + "-" + "D" * 5 + "-" + "E" * 5 + "-" + "F" * 5),
     ("AGE_SECRET_KEY", "AGE-SECRET-KEY-1" + "Q" * 58),
     ("OKTA_TOKEN", "00" + "a" * 40),
 
@@ -280,6 +280,23 @@ PATTERN_TEST_CASES = [
     ("CLOUDFLARE_API_TOKEN", "v1.0-" + "a" * 24 + "-" + "b" * 146),
 
     # ================================================================
+    # WEB3 / CRYPTO WALLETS
+    # ================================================================
+    ("WALLET_PRIVATE_KEY", 'private_key = "0x' + "a" * 64 + '"'),
+    ("WALLET_MNEMONIC", 'mnemonic = "' + " ".join(["abandon", "ability", "able", "about", "above", "absent", "absorb", "abstract", "absurd", "abuse", "access", "accident"]) + '"'),
+    ("BTC_PRIVATE_KEY", "5" + "H" * 50),  # uncompressed WIF (51 chars)
+    # Note: compressed WIF (K/L prefix, 52 chars) also tested via BTC test below
+    ("SOLANA_PRIVATE_KEY", 'solana_private_key = "' + "A" * 87 + '"'),
+    ("INFURA_KEY", 'infura_key = "' + "a" * 32 + '"'),
+    ("ALCHEMY_KEY", 'alchemy_key = "' + "a" * 32 + '"'),
+    ("INFURA_URL", "https://mainnet.infura.io/v3/" + "a" * 32),
+    ("ALCHEMY_URL", "https://eth-mainnet.g.alchemy.com/v2/" + "a" * 32),
+    ("ETHERSCAN_KEY", 'etherscan_key = "' + "a" * 34 + '"'),
+    ("ANKR_URL", "https://rpc.ankr.com/eth/" + "a" * 64),
+    ("QUICKNODE_URL", "https://cool-dawn-1234.quiknode.pro/" + "a" * 40),
+
+
+    # ================================================================
     # GIT CREDENTIALS
     # ================================================================
     ("GIT_URL_GITHUB_PAT", "https://user:ghp_" + "a" * 36 + "@github.com/org/repo"),
@@ -290,7 +307,7 @@ PATTERN_TEST_CASES = [
     # PRIVATE KEYS / TOKENS
     # ================================================================
     ("PRIVATE_KEY_BLOCK", "-----BEGIN RSA PRIVATE KEY-----"),
-    ("JWT_TOKEN", "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.AAAAAAAAAAAAAAAAAAAAAAAAA"),
+    ("JWT_TOKEN", "eyJ" + "A" * 20 + ".eyJ" + "B" * 20 + "." + "C" * 20),
     ("JWT_SECRET", 'jwt_secret = "' + "A" * 32 + '"'),
 
     # ================================================================
@@ -326,6 +343,15 @@ FALSE_POSITIVE_CASES = [
     ("markdown_heading", "## Architecture Decision Records"),
     ("log_line", "[INFO] 2026-03-28 Server started on port 8087"),
     ("docker_image", "ghcr.io/myorg/myapp:latest"),
+    # Web3 false positives — these MUST NOT be redacted
+    ("eth_contract_address", "Contract: 0xe63f1adbc4c2eaa088c5e78d2a0cf51272ef9688"),
+    ("eth_tx_hash", "Transaction: 0x" + "a" * 64),
+    ("eth_block_hash", "Block: 0x" + "b" * 64),
+    ("solidity_bytes32", "bytes32 constant SALT = 0x" + "c" * 64 + ";"),
+    ("normal_english_12_words", "the quick brown fox jumps over the lazy dog and some more"),
+    ("btc_address", "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"),
+    ("eth_public_address", "0x742d35Cc6634C0532925a3b844Bc9e7595f2bD18"),
+    ("camel_case_non_wallet_key", 'someKey = "0x' + "E" * 64 + '"'),
 ]
 
 

@@ -1143,6 +1143,511 @@ class TestGlobalMapping:
             os.unlink(f)
 
 
+
+# ══════════════════════════════════════════════════════════════════════════
+# NEW TESTS: Web3 / Crypto Wallet Patterns
+# ══════════════════════════════════════════════════════════════════════════
+
+class TestWeb3Patterns:
+    """E2E tests for Web3 wallet private key protection."""
+
+    def test_wallet_private_key_redact_restore(self, sid):
+        """Context-based ETH private key should be redacted and restored."""
+        hex_key = "0x" + "a" * 64
+        orig = f'DEPLOYER_PRIVATE_KEY = "{hex_key}"\n'
+        f = _tmp(orig)
+        try:
+            o, c, _ = run_hook("Read", {"file_path": f}, sid)
+            assert c == 0
+            with open(f) as fh:
+                red = fh.read()
+            assert hex_key not in red, "Private key should be redacted"
+            assert _ph_prefix("WALLET_PRIVATE_KEY") in red
+            run_hook("Read", {"file_path": f}, sid, is_post=True)
+            with open(f) as fh:
+                assert fh.read() == orig, "File should be restored"
+        finally:
+            os.unlink(f)
+
+    def test_wallet_private_key_without_0x_prefix(self, sid):
+        """ETH private key without 0x prefix should also be redacted with context."""
+        hex_key = "a" * 64
+        orig = f'private_key = "{hex_key}"\n'
+        f = _tmp(orig)
+        try:
+            run_hook("Read", {"file_path": f}, sid)
+            with open(f) as fh:
+                red = fh.read()
+            assert hex_key not in red, "Private key without 0x should be redacted"
+            assert _ph_prefix("WALLET_PRIVATE_KEY") in red
+            run_hook("Read", {"file_path": f}, sid, is_post=True)
+        finally:
+            os.unlink(f)
+
+    def test_bare_hex_not_redacted(self, sid):
+        """Bare 0x + 64 hex chars WITHOUT context keywords should NOT be redacted as wallet key."""
+        hex_str = "0x" + "a" * 64
+        orig = f"tx_hash = {hex_str}\n"
+        f = _tmp(orig)
+        try:
+            run_hook("Read", {"file_path": f}, sid)
+            with open(f) as fh:
+                red = fh.read()
+            assert "WALLET_PRIVATE_KEY" not in red, "tx_hash context should not trigger wallet pattern"
+            run_hook("Read", {"file_path": f}, sid, is_post=True)
+        finally:
+            os.unlink(f)
+
+    def test_mnemonic_redact_restore(self, sid):
+        """BIP39 mnemonic with context keyword should be redacted."""
+        words = "abandon ability able about above absent absorb abstract absurd abuse access accident"
+        orig = f'MNEMONIC = "{words}"\n'
+        f = _tmp(orig)
+        try:
+            run_hook("Read", {"file_path": f}, sid)
+            with open(f) as fh:
+                red = fh.read()
+            assert words not in red, "Mnemonic should be redacted"
+            assert _ph_prefix("WALLET_MNEMONIC") in red
+            run_hook("Read", {"file_path": f}, sid, is_post=True)
+            with open(f) as fh:
+                assert fh.read() == orig
+        finally:
+            os.unlink(f)
+
+    def test_normal_english_not_mnemonic(self, sid):
+        """Normal English sentences should NOT trigger mnemonic detection."""
+        orig = 'description = "the quick brown fox jumps over the lazy dog and some more words here"\n'
+        f = _tmp(orig)
+        try:
+            run_hook("Read", {"file_path": f}, sid)
+            with open(f) as fh:
+                red = fh.read()
+            assert "WALLET_MNEMONIC" not in red
+            run_hook("Read", {"file_path": f}, sid, is_post=True)
+        finally:
+            os.unlink(f)
+
+    def test_btc_wif_redacted(self, sid):
+        """Bitcoin WIF private key should be redacted."""
+        wif = "5" + "H" * 50
+        orig = f"btc_key = {wif}\n"
+        f = _tmp(orig)
+        try:
+            run_hook("Read", {"file_path": f}, sid)
+            with open(f) as fh:
+                red = fh.read()
+            assert wif not in red, "BTC WIF should be redacted"
+            assert _ph_prefix("BTC_PRIVATE_KEY") in red
+            run_hook("Read", {"file_path": f}, sid, is_post=True)
+        finally:
+            os.unlink(f)
+
+    def test_infura_key_redacted(self, sid):
+        """Infura API key with context should be redacted."""
+        key = "a" * 32
+        orig = f'INFURA_KEY = "{key}"\n'
+        f = _tmp(orig)
+        try:
+            run_hook("Read", {"file_path": f}, sid)
+            with open(f) as fh:
+                red = fh.read()
+            assert _ph_prefix("INFURA_KEY") in red
+            run_hook("Read", {"file_path": f}, sid, is_post=True)
+        finally:
+            os.unlink(f)
+
+    def test_alchemy_key_redacted(self, sid):
+        """Alchemy API key with context should be redacted."""
+        key = "A" * 32
+        orig = f'alchemy_key = "{key}"\n'
+        f = _tmp(orig)
+        try:
+            run_hook("Read", {"file_path": f}, sid)
+            with open(f) as fh:
+                red = fh.read()
+            assert _ph_prefix("ALCHEMY_KEY") in red
+            run_hook("Read", {"file_path": f}, sid, is_post=True)
+        finally:
+            os.unlink(f)
+
+    def test_web3_write_restores_placeholder(self, sid):
+        """Write with Web3 placeholder should restore real value."""
+        hex_key = "0x" + "b" * 64
+        orig = f'secret_key = "{hex_key}"\n'
+        f = _tmp(orig)
+        try:
+            run_hook("Read", {"file_path": f}, sid)
+            run_hook("Read", {"file_path": f}, sid, is_post=True)
+            # Find the placeholder for our hex key in the mapping
+            with open(GLOBAL_MAPPING_PATH, 'rb') as mf:
+                raw = mf.read()
+            fernet = _get_fernet()
+            if fernet:
+                try:
+                    data = json.loads(fernet.decrypt(raw))
+                except Exception:
+                    data = json.loads(raw)
+            else:
+                data = json.loads(raw)
+            ph = None
+            for secret, placeholder in data.get("secret_to_placeholder", {}).items():
+                if hex_key in secret:
+                    ph = placeholder
+                    break
+            assert ph is not None, "Placeholder should exist for wallet key"
+            o, c, _ = run_hook("Write", {"file_path": "/out.py", "content": f"KEY={ph}\n"}, sid)
+            assert c == 0 and o is not None
+            restored = o["hookSpecificOutput"]["updatedInput"]["content"]
+            assert hex_key in restored, "Placeholder should restore to real private key"
+        finally:
+            os.unlink(f)
+
+
+    def test_infura_url_redacted(self, sid):
+        """Infura RPC endpoint URL should be redacted."""
+        url = "https://mainnet.infura.io/v3/" + "a" * 32
+        orig = f'const provider = new Web3("{url}")\n'
+        f = _tmp(orig)
+        try:
+            run_hook("Read", {"file_path": f}, sid)
+            with open(f) as fh:
+                red = fh.read()
+            assert url not in red, "Infura URL should be redacted"
+            assert _ph_prefix("INFURA_URL") in red
+            run_hook("Read", {"file_path": f}, sid, is_post=True)
+        finally:
+            os.unlink(f)
+
+    def test_alchemy_url_redacted(self, sid):
+        """Alchemy RPC endpoint URL should be redacted."""
+        url = "https://eth-mainnet.g.alchemy.com/v2/" + "A" * 32
+        orig = f'RPC_URL = "{url}"\n'
+        f = _tmp(orig)
+        try:
+            run_hook("Read", {"file_path": f}, sid)
+            with open(f) as fh:
+                red = fh.read()
+            assert url not in red, "Alchemy URL should be redacted"
+            assert _ph_prefix("ALCHEMY_URL") in red
+            run_hook("Read", {"file_path": f}, sid, is_post=True)
+        finally:
+            os.unlink(f)
+
+    def test_btc_compressed_wif_redacted(self, sid):
+        """Compressed BTC WIF key (K/L prefix, 52 chars) should be redacted."""
+        wif = "K" + "j" * 51
+        orig = f"btc_key = {wif}\n"
+        f = _tmp(orig)
+        try:
+            run_hook("Read", {"file_path": f}, sid)
+            with open(f) as fh:
+                red = fh.read()
+            assert wif not in red, "Compressed BTC WIF should be redacted"
+            assert _ph_prefix("BTC_PRIVATE_KEY") in red
+            run_hook("Read", {"file_path": f}, sid, is_post=True)
+        finally:
+            os.unlink(f)
+
+    def test_camelcase_private_key_redacted(self, sid):
+        """camelCase privateKey should also be redacted."""
+        hex_key = "0x" + "c" * 64
+        orig = f'"privateKey": "{hex_key}"\n'
+        f = _tmp(orig)
+        try:
+            run_hook("Read", {"file_path": f}, sid)
+            with open(f) as fh:
+                red = fh.read()
+            assert hex_key not in red, "camelCase privateKey should be redacted"
+            assert _ph_prefix("WALLET_PRIVATE_KEY") in red
+            run_hook("Read", {"file_path": f}, sid, is_post=True)
+        finally:
+            os.unlink(f)
+
+    def test_24_word_mnemonic_redacted(self, sid):
+        """24-word BIP39 mnemonic should be redacted."""
+        words = " ".join(["abandon"] * 23 + ["art"])
+        orig = f'seed_phrase = "{words}"\n'
+        f = _tmp(orig)
+        try:
+            run_hook("Read", {"file_path": f}, sid)
+            with open(f) as fh:
+                red = fh.read()
+            assert words not in red, "24-word mnemonic should be redacted"
+            assert _ph_prefix("WALLET_MNEMONIC") in red
+            run_hook("Read", {"file_path": f}, sid, is_post=True)
+        finally:
+            os.unlink(f)
+
+    def test_generic_secret_covers_full_hex_key(self, sid):
+        """GENERIC_SECRET with bare 'secret' keyword should not truncate 64-hex private key."""
+        hex_key = "0x" + "f" * 64
+        orig = f'secret = "{hex_key}"\n'
+        f = _tmp(orig)
+        try:
+            run_hook("Read", {"file_path": f}, sid)
+            with open(f) as fh:
+                red = fh.read()
+            # The entire hex key should be redacted (no partial exposure)
+            assert hex_key not in red, "Full hex key should be redacted by GENERIC_SECRET"
+            # No trailing hex chars should be visible
+            assert "ffffff" not in red, "No trailing hex chars should leak"
+            run_hook("Read", {"file_path": f}, sid, is_post=True)
+        finally:
+            os.unlink(f)
+
+
+    def test_infura_wss_url_redacted(self, sid):
+        """Infura WebSocket URL should be redacted."""
+        url = "wss://mainnet.infura.io/ws/v3/" + "a" * 32
+        orig = f'WS_URL = "{url}"\n'
+        f = _tmp(orig)
+        try:
+            run_hook("Read", {"file_path": f}, sid)
+            with open(f) as fh:
+                red = fh.read()
+            assert url not in red, "Infura WSS URL should be redacted"
+            assert _ph_prefix("INFURA_URL") in red
+            run_hook("Read", {"file_path": f}, sid, is_post=True)
+        finally:
+            os.unlink(f)
+
+    def test_alchemy_wss_url_redacted(self, sid):
+        """Alchemy WebSocket URL should be redacted."""
+        url = "wss://eth-mainnet.g.alchemy.com/v2/" + "A" * 32
+        orig = f'WS_URL = "{url}"\n'
+        f = _tmp(orig)
+        try:
+            run_hook("Read", {"file_path": f}, sid)
+            with open(f) as fh:
+                red = fh.read()
+            assert url not in red, "Alchemy WSS URL should be redacted"
+            assert _ph_prefix("ALCHEMY_URL") in red
+            run_hook("Read", {"file_path": f}, sid, is_post=True)
+        finally:
+            os.unlink(f)
+
+    def test_signer_key_redacted(self, sid):
+        """signer_key context keyword should trigger WALLET_PRIVATE_KEY."""
+        hex_key = "0x" + "e" * 64
+        orig = f'signer_key = "{hex_key}"\n'
+        f = _tmp(orig)
+        try:
+            run_hook("Read", {"file_path": f}, sid)
+            with open(f) as fh:
+                red = fh.read()
+            assert hex_key not in red, "signer_key should be redacted"
+            assert _ph_prefix("WALLET_PRIVATE_KEY") in red
+            run_hook("Read", {"file_path": f}, sid, is_post=True)
+        finally:
+            os.unlink(f)
+
+
+    def test_etherscan_key_redacted(self, sid):
+        """Etherscan API key with context should be redacted."""
+        key = "a" * 34
+        orig = f'ETHERSCAN_KEY = "{key}"\n'
+        f = _tmp(orig)
+        try:
+            run_hook("Read", {"file_path": f}, sid)
+            with open(f) as fh:
+                red = fh.read()
+            assert _ph_prefix("ETHERSCAN_KEY") in red
+            run_hook("Read", {"file_path": f}, sid, is_post=True)
+        finally:
+            os.unlink(f)
+
+    def test_ankr_url_redacted(self, sid):
+        """Ankr RPC endpoint URL should be redacted."""
+        url = "https://rpc.ankr.com/eth/" + "a" * 64
+        orig = f'RPC_URL = "{url}"\n'
+        f = _tmp(orig)
+        try:
+            run_hook("Read", {"file_path": f}, sid)
+            with open(f) as fh:
+                red = fh.read()
+            assert url not in red, "Ankr URL should be redacted"
+            assert _ph_prefix("ANKR_URL") in red
+            run_hook("Read", {"file_path": f}, sid, is_post=True)
+        finally:
+            os.unlink(f)
+
+    def test_quicknode_url_redacted(self, sid):
+        """QuickNode RPC endpoint URL should be redacted."""
+        url = "https://cool-dawn-1234.quiknode.pro/" + "a" * 40
+        orig = f'RPC_URL = "{url}"\n'
+        f = _tmp(orig)
+        try:
+            run_hook("Read", {"file_path": f}, sid)
+            with open(f) as fh:
+                red = fh.read()
+            assert url not in red, "QuickNode URL should be redacted"
+            assert _ph_prefix("QUICKNODE_URL") in red
+            run_hook("Read", {"file_path": f}, sid, is_post=True)
+        finally:
+            os.unlink(f)
+
+
+class TestWeb3BlockList:
+    """Test that Web3 config files are blocked."""
+
+    def test_block_hardhat_config_js(self, sid):
+        o, c, _ = run_hook("Read", {"file_path": "/project/hardhat.config.js"}, sid)
+        assert c == 0 and o is not None
+        assert o["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+    def test_block_hardhat_config_ts(self, sid):
+        o, c, _ = run_hook("Read", {"file_path": "/project/hardhat.config.ts"}, sid)
+        assert c == 0 and o is not None
+        assert o["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+    def test_block_truffle_config(self, sid):
+        o, c, _ = run_hook("Read", {"file_path": "/project/truffle-config.js"}, sid)
+        assert c == 0 and o is not None
+        assert o["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+    def test_block_foundry_toml(self, sid):
+        o, c, _ = run_hook("Read", {"file_path": "/project/foundry.toml"}, sid)
+        assert c == 0 and o is not None
+        assert o["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+    def test_block_mnemonic_txt(self, sid):
+        o, c, _ = run_hook("Read", {"file_path": "/project/mnemonic.txt"}, sid)
+        assert c == 0 and o is not None
+        assert o["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+    def test_block_dot_secret(self, sid):
+        o, c, _ = run_hook("Read", {"file_path": "/project/.secret"}, sid)
+        assert c == 0 and o is not None
+        assert o["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+    def test_block_brownie_config(self, sid):
+        o, c, _ = run_hook("Read", {"file_path": "/project/brownie-config.yaml"}, sid)
+        assert c == 0 and o is not None
+        assert o["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+    def test_bash_cat_hardhat_blocked(self, sid):
+        o, c, _ = run_hook("Bash", {"command": "cat hardhat.config.js"}, sid)
+        assert c == 0 and o is not None
+        assert o["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+    def test_bash_cat_mnemonic_blocked(self, sid):
+        o, c, _ = run_hook("Bash", {"command": "cat mnemonic.txt"}, sid)
+        assert c == 0 and o is not None
+        assert o["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# NEW TESTS: CLAUDE.md Auto-Injection
+# ══════════════════════════════════════════════════════════════════════════
+
+class TestClaudeMdInjection:
+    """Test the install.sh CLAUDE.md injection logic (simulated via shell)."""
+
+    MARKER_START = "<!-- claude-secret-shield:start -->"
+    MARKER_END = "<!-- claude-secret-shield:end -->"
+    INSTALL_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "install.sh")
+
+    def _run_injection(self, claude_md_path):
+        """Run just the CLAUDE.md injection portion of install.sh."""
+        script = r"""
+CLAUDE_MD="%s"
+MARKER_START="<!-- claude-secret-shield:start -->"
+MARKER_END="<!-- claude-secret-shield:end -->"
+
+SHIELD_SECTION="${MARKER_START}
+## Secret Shield
+
+Placeholder guidance for LLM.
+${MARKER_END}"
+
+if [ -f "$CLAUDE_MD" ]; then
+  if grep -qF "$MARKER_START" "$CLAUDE_MD"; then
+    python3 -c "
+import sys, re
+with open(sys.argv[1], 'r') as f:
+    content = f.read()
+start_marker = sys.argv[2]
+end_marker = sys.argv[3]
+new_section = sys.argv[4]
+pattern = re.escape(start_marker) + r'.*?' + re.escape(end_marker)
+result = re.sub(pattern, new_section, content, count=1, flags=re.DOTALL)
+with open(sys.argv[1], 'w') as f:
+    f.write(result)
+" "$CLAUDE_MD" "$MARKER_START" "$MARKER_END" "$SHIELD_SECTION"
+  else
+    printf '\n%%s\n' "$SHIELD_SECTION" >> "$CLAUDE_MD"
+  fi
+else
+  printf '%%s\n' "$SHIELD_SECTION" > "$CLAUDE_MD"
+fi
+""" % claude_md_path
+        r = subprocess.run(
+            ["sh", "-c", script],
+            capture_output=True, text=True, timeout=10,
+        )
+        return r.returncode, r.stdout, r.stderr
+
+    def test_creates_new_claude_md(self, tmp_path):
+        """When CLAUDE.md does not exist, creates it with shield section."""
+        claude_md = tmp_path / "CLAUDE.md"
+        rc, _, _ = self._run_injection(str(claude_md))
+        assert rc == 0
+        assert claude_md.exists()
+        content = claude_md.read_text()
+        assert self.MARKER_START in content
+        assert self.MARKER_END in content
+        assert "Secret Shield" in content
+
+    def test_appends_to_existing_claude_md(self, tmp_path):
+        """When CLAUDE.md exists without marker, appends section."""
+        claude_md = tmp_path / "CLAUDE.md"
+        original = "# My Project\n\nExisting instructions here.\n"
+        claude_md.write_text(original)
+
+        rc, _, _ = self._run_injection(str(claude_md))
+        assert rc == 0
+        content = claude_md.read_text()
+        assert "# My Project" in content
+        assert self.MARKER_START in content
+        assert "Secret Shield" in content
+
+    def test_idempotent_no_duplicate(self, tmp_path):
+        """Running injection twice should not duplicate the section."""
+        claude_md = tmp_path / "CLAUDE.md"
+        claude_md.write_text("# My Project\n")
+
+        self._run_injection(str(claude_md))
+        content_after_first = claude_md.read_text()
+
+        self._run_injection(str(claude_md))
+        content_after_second = claude_md.read_text()
+
+        assert content_after_first == content_after_second
+        assert content_after_second.count(self.MARKER_START) == 1
+
+    def test_upgrade_replaces_section(self, tmp_path):
+        """Running injection on a file with old marker replaces the section."""
+        claude_md = tmp_path / "CLAUDE.md"
+        old_content = (
+            "# My Project\n\n"
+            f"{self.MARKER_START}\n"
+            "## Old Secret Shield\nOld content here.\n"
+            f"{self.MARKER_END}\n\n"
+            "# Other Section\n"
+        )
+        claude_md.write_text(old_content)
+
+        rc, _, _ = self._run_injection(str(claude_md))
+        assert rc == 0
+        content = claude_md.read_text()
+        assert "Old content here." not in content
+        assert "# My Project" in content
+        assert "# Other Section" in content
+        assert content.count(self.MARKER_START) == 1
+
+
 # ══════════════════════════════════════════════════════════════════════════
 # Legacy runner (python3 test_hook.py still works)
 # ══════════════════════════════════════════════════════════════════════════
@@ -1229,8 +1734,41 @@ class TestUserPromptSubmit:
         result, code, _ = self._run_prompt_hook("-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAK...")
         assert code == 0 and result is not None and result["decision"] == "block"
 
+    def test_wallet_private_key_in_prompt_blocked(self):
+        hex_key = "0x" + "a" * 64
+        result, code, _ = self._run_prompt_hook(f'private_key = "{hex_key}"')
+        assert code == 0 and result is not None
+        assert result["decision"] == "block"
+
+    def test_mnemonic_in_prompt_blocked(self):
+        words = "abandon ability able about above absent absorb abstract absurd abuse access accident"
+        result, code, _ = self._run_prompt_hook(f'mnemonic = "{words}"')
+        assert code == 0 and result is not None
+        assert result["decision"] == "block"
+
+    def test_btc_wif_in_prompt_blocked(self):
+        wif = "5" + "H" * 50
+        result, code, _ = self._run_prompt_hook(f"My BTC key: {wif}")
+        assert code == 0 and result is not None
+        assert result["decision"] == "block"
+
     def test_contract_address_not_blocked(self):
         result, code, _ = self._run_prompt_hook("Contract: 0xe63f1adbc4c2eaa088c5e78d2a0cf51272ef9688")
+        assert code == 0
+        if result:
+            assert result.get("decision") != "block"
+
+
+
+    def test_infura_url_in_prompt_blocked(self):
+        url = "https://mainnet.infura.io/v3/" + "a" * 32
+        result, code, _ = self._run_prompt_hook(f"Use RPC: {url}")
+        assert code == 0 and result is not None
+        assert result["decision"] == "block"
+
+    def test_bare_tx_hash_not_blocked(self):
+        """Bare 0x + 64 hex without context keyword should NOT be blocked."""
+        result, code, _ = self._run_prompt_hook("Check tx: 0x" + "a" * 64)
         assert code == 0
         if result:
             assert result.get("decision") != "block"

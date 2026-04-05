@@ -4,10 +4,11 @@ Secret patterns for claude-secret-shield
 Users can customize by editing this file or adding patterns to:
   ~/.claude/hooks/redact-patterns.py
 
-140 secret patterns + 37 blocked files, sourced from 200+ providers
+183 secret patterns + 48 blocked files, sourced from 200+ providers
 via tokligence_guard, gitleaks, and GitHub secret scanning coverage.
 
 March 2026 additions: LangSmith, PostHog, Pinecone, Vercel, Atlassian, Brevo.
+April 2026 additions: Web3 wallet private keys, mnemonics, Infura, Alchemy.
 """
 
 # ── Strategy 1: Block list ──────────────────────────────────────────────
@@ -54,6 +55,14 @@ BLOCKED_FILES = [
     "oauth-credentials.json",
     ".kaggle/kaggle.json",
     "application-default-credentials.json",
+    # Web3 / Crypto wallet config files (often contain mnemonics or private keys)
+    "hardhat.config.js",
+    "hardhat.config.ts",
+    "truffle-config.js",
+    "foundry.toml",
+    "mnemonic.txt",
+    ".secret",
+    "brownie-config.yaml",
 ]
 
 # ── Strategy 2: Secret patterns ─────────────────────────────────────────
@@ -390,6 +399,36 @@ SECRET_PATTERNS = [
     ("CLOUDFLARE_API_TOKEN", r'v1\.0-[a-f0-9]{24}-[a-f0-9]{146}'),
 
     # ================================================================
+    # WEB3 / CRYPTO WALLETS
+    # ================================================================
+
+    # Ethereum / EVM private key — context-based to avoid matching tx hashes, addresses, etc.
+    # Matches: private_key = "0x...", privateKey: "0x...", wallet_secret=0x..., etc.
+    ("WALLET_PRIVATE_KEY", r'(?i)(?:private[_-]?key|secret[_-]?key|wallet[_-]?(?:secret|private|key)|sign(?:ing|er)[_-]?key|deployer[_-]?key|owner[_-]?key|account[_-]?key|eth(?:ereum)?[_-]?(?:private[_-]?)?key|hot[_-]?wallet[_-]?key|cold[_-]?wallet[_-]?key)["\']?\s*[:=]\s*["\']?(?:0x)?[a-fA-F0-9]{64}["\']?'),
+    # BIP39 mnemonic / seed phrase — context-based to avoid matching normal English text
+    ("WALLET_MNEMONIC", r'(?i)(?:mnemonic|seed[_-]?phrase|recovery[_-]?phrase|hd[_-]?wallet|wallet[_-]?words|secret[_-]?phrase|backup[_-]?phrase)["\']?\s*[:=]\s*["\']?[a-z]+(?:\s+[a-z]+){11,23}["\']?'),
+    # Bitcoin WIF (Wallet Import Format) — distinctive prefix makes it low false-positive
+    # 51 chars for uncompressed (5-prefix), 52 chars for compressed (K/L-prefix)
+    ("BTC_PRIVATE_KEY", r'\b[5KL][1-9A-HJ-NP-Za-km-z]{50,51}\b'),
+    # Solana private key (base58-encoded 64-byte keypair, 87-88 chars)
+    # Context-based to avoid matching other base58 strings
+    ("SOLANA_PRIVATE_KEY", r'(?i)(?:solana[_-]?(?:private[_-]?)?key|sol[_-]?(?:private[_-]?)?key|solana[_-]?keypair|phantom[_-]?key)["\']?\s*[:=]\s*["\']?[1-9A-HJ-NP-Za-km-z]{87,88}["\']?'),
+    # Infura API key (context-based)
+    ("INFURA_KEY", r'(?i)(?:infura[_-]?(?:api[_-]?)?(?:key|token|id|secret)|infura[_-]?project[_-]?(?:id|secret))["\']?\s*[:=]\s*["\']?[a-f0-9]{32}["\']?'),
+    # Infura RPC endpoint URL — HTTP and WebSocket (most common leak vector for Infura keys)
+    ("INFURA_URL", r'(?:https?|wss?)://[a-z0-9-]+\.infura\.io/(?:v3|ws/v3)/[a-f0-9]{32}'),
+    # Alchemy API key (context-based)
+    ("ALCHEMY_KEY", r'(?i)(?:alchemy[_-]?(?:api[_-]?)?(?:key|token|secret))["\']?\s*[:=]\s*["\']?[a-zA-Z0-9_-]{32,}["\']?'),
+    # Alchemy RPC endpoint URL — HTTP and WebSocket (most common leak vector for Alchemy keys)
+    ("ALCHEMY_URL", r'(?:https?|wss?)://[a-z0-9-]+\.(?:g\.)?alchemy\.com/v2/[a-zA-Z0-9_-]{32,}'),
+    # Etherscan API key (context-based)
+    ("ETHERSCAN_KEY", r'(?i)(?:etherscan[_-]?(?:api[_-]?)?key|(?:bsc|polygon|arb|ftm|optimism)scan[_-]?(?:api[_-]?)?key)["\']?\s*[:=]\s*["\']?[a-zA-Z0-9]{34}["\']?'),
+    # Ankr RPC endpoint URL
+    ("ANKR_URL", r'https://rpc\.ankr\.com/[a-z0-9_-]+/[a-f0-9]{64}'),
+    # QuickNode RPC endpoint URL
+    ("QUICKNODE_URL", r'(?:https?|wss?)://[a-z0-9-]+\.(?:[a-z]+-)?quiknode\.pro/[a-f0-9]{40,}'),
+
+    # ================================================================
     # GIT CREDENTIALS (URLs with embedded tokens)
     # ================================================================
 
@@ -425,7 +464,7 @@ SECRET_PATTERNS = [
 
     # Generic key=value secrets (in env-like contexts)
     ("GENERIC_API_KEY", r'(?i)(?:api[_-]?key|apikey)["\']?\s*[:=]\s*["\']?[A-Za-z0-9_-]{20,60}["\']?'),
-    ("GENERIC_SECRET", r'(?i)(?:secret|password|passwd|pwd)["\']?\s*[:=]\s*["\']?[^\s"\']{10,60}["\']?'),
+    ("GENERIC_SECRET", r'(?i)(?:secret|password|passwd|pwd)["\']?\s*[:=]\s*["\']?[^\s"\']{10,80}["\']?'),
     # Base64 secrets in env-like contexts
     ("BASE64_SECRET", r'(?i)(?:KEY|SECRET|TOKEN|PASSWORD)\s*[:=]\s*[A-Za-z0-9+/]{40,}={0,2}'),
 ]

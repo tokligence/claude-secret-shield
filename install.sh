@@ -141,6 +141,56 @@ fi
 
 echo "  OK: Updated $SETTINGS_FILE"
 
+# ── Inject placeholder guidance into ~/.claude/CLAUDE.md ──────────────
+CLAUDE_MD="$HOME/.claude/CLAUDE.md"
+MARKER_START="<!-- claude-secret-shield:start -->"
+MARKER_END="<!-- claude-secret-shield:end -->"
+
+SHIELD_SECTION="${MARKER_START}
+## Secret Shield
+
+This environment uses **claude-secret-shield**. Values in \`{{NAME_hash}}\` format
+(e.g. \`{{OPENAI_KEY_8f3a2b1c}}\`, \`{{WALLET_PRIVATE_KEY_d4e5f6a7}}\`) are
+**redacted secret placeholders** — the real values have been replaced for safety.
+
+Rules for working with placeholders:
+- Treat placeholders as the actual secret values for all tasks.
+- Use them as-is in code, file edits, and shell commands.
+- The hook automatically restores real values before execution.
+- **Never** ask the user to substitute, reveal, or re-enter the real values.
+- **Never** attempt to guess, decode, or reconstruct the original secrets.
+${MARKER_END}"
+
+echo "  -> Configuring CLAUDE.md placeholder guidance..."
+
+if [ -f "$CLAUDE_MD" ]; then
+  if grep -qF "$MARKER_START" "$CLAUDE_MD"; then
+    # Replace existing section (upgrade path)
+    # Use Python for reliable multiline replacement between markers
+    python3 -c "
+import sys, re
+with open(sys.argv[1], 'r') as f:
+    content = f.read()
+start_marker = sys.argv[2]
+end_marker = sys.argv[3]
+new_section = sys.argv[4]
+pattern = re.escape(start_marker) + r'.*?' + re.escape(end_marker)
+result = re.sub(pattern, new_section, content, count=1, flags=re.DOTALL)
+with open(sys.argv[1], 'w') as f:
+    f.write(result)
+" "$CLAUDE_MD" "$MARKER_START" "$MARKER_END" "$SHIELD_SECTION"
+    echo "  OK: Updated existing section in $CLAUDE_MD"
+  else
+    # Append to existing file (with blank line separator)
+    printf '\n%s\n' "$SHIELD_SECTION" >> "$CLAUDE_MD"
+    echo "  OK: Appended section to $CLAUDE_MD"
+  fi
+else
+  # Create new file
+  printf '%s\n' "$SHIELD_SECTION" > "$CLAUDE_MD"
+  echo "  OK: Created $CLAUDE_MD"
+fi
+
 echo ""
 echo "  Installation complete!"
 echo ""
