@@ -1184,8 +1184,8 @@ class TestWeb3Patterns:
         finally:
             os.unlink(f)
 
-    def test_bare_hex_not_redacted(self, sid):
-        """Bare 0x + 64 hex chars WITHOUT context keywords should NOT be redacted as wallet key."""
+    def test_bare_hex_caught_by_hex_credential(self, sid):
+        """Bare 0x + 64 hex chars should be caught by HEX_CREDENTIAL catch-all."""
         hex_str = "0x" + "a" * 64
         orig = f"tx_hash = {hex_str}\n"
         f = _tmp(orig)
@@ -1193,7 +1193,8 @@ class TestWeb3Patterns:
             run_hook("Read", {"file_path": f}, sid)
             with open(f) as fh:
                 red = fh.read()
-            assert "WALLET_PRIVATE_KEY" not in red, "tx_hash context should not trigger wallet pattern"
+            assert hex_str not in red, "Bare hex should be redacted by HEX_CREDENTIAL"
+            assert _ph_prefix("HEX_CREDENTIAL") in red
             run_hook("Read", {"file_path": f}, sid, is_post=True)
         finally:
             os.unlink(f)
@@ -1231,7 +1232,7 @@ class TestWeb3Patterns:
     def test_btc_wif_redacted(self, sid):
         """Bitcoin WIF private key should be redacted."""
         wif = "5" + "H" * 50
-        orig = f"btc_key = {wif}\n"
+        orig = f"wif_value = {wif}\n"
         f = _tmp(orig)
         try:
             run_hook("Read", {"file_path": f}, sid)
@@ -1337,7 +1338,7 @@ class TestWeb3Patterns:
     def test_btc_compressed_wif_redacted(self, sid):
         """Compressed BTC WIF key (K/L prefix, 52 chars) should be redacted."""
         wif = "K" + "j" * 51
-        orig = f"btc_key = {wif}\n"
+        orig = f"wif_value = {wif}\n"
         f = _tmp(orig)
         try:
             run_hook("Read", {"file_path": f}, sid)
@@ -1503,19 +1504,22 @@ class TestWeb3Patterns:
         finally:
             os.unlink(f)
 
-    def test_hex_credential_unquoted_not_matched(self, sid):
-        """Unquoted 0x+64hex should NOT be caught (reduces Solidity false positives)."""
-        hex_str = "0x" + "a" * 64
-        orig = f"bytes32 constant SALT = {hex_str};\n"
+
+    def test_bare_hex_in_file_redacted(self, sid):
+        """Bare 0x+64hex in a file (no quotes, no assignment) should be caught."""
+        hex_key = "0x" + "d" * 64
+        orig = f"Send to {hex_key} now\n"
         f = _tmp(orig)
         try:
             run_hook("Read", {"file_path": f}, sid)
             with open(f) as fh:
                 red = fh.read()
-            assert "HEX_CREDENTIAL" not in red, "Unquoted hex should not trigger HEX_CREDENTIAL"
+            assert hex_key not in red, "Bare hex in file should be redacted"
+            assert _ph_prefix("HEX_CREDENTIAL") in red
             run_hook("Read", {"file_path": f}, sid, is_post=True)
         finally:
             os.unlink(f)
+
 
     def test_wallet_private_key_wins_over_hex_credential(self, sid):
         """When context keyword exists, WALLET_PRIVATE_KEY should match (higher priority)."""
@@ -1797,6 +1801,14 @@ class TestUserPromptSubmit:
         assert code == 0 and result is not None
         assert result["decision"] == "block"
 
+
+    def test_bare_0x_hex_in_prompt_blocked(self):
+        """Bare 0x+64hex pasted in prompt should be blocked."""
+        hex_key = "0x" + "a" * 64
+        result, code, _ = self._run_prompt_hook(f"Use this: {hex_key}")
+        assert code == 0 and result is not None
+        assert result["decision"] == "block"
+
     def test_contract_address_not_blocked(self):
         result, code, _ = self._run_prompt_hook("Contract: 0xe63f1adbc4c2eaa088c5e78d2a0cf51272ef9688")
         assert code == 0
@@ -1811,12 +1823,11 @@ class TestUserPromptSubmit:
         assert code == 0 and result is not None
         assert result["decision"] == "block"
 
-    def test_bare_tx_hash_not_blocked(self):
-        """Bare 0x + 64 hex without context keyword should NOT be blocked."""
+    def test_bare_tx_hash_now_blocked(self):
+        """Bare 0x + 64 hex in prompt IS now blocked by HEX_CREDENTIAL catch-all."""
         result, code, _ = self._run_prompt_hook("Check tx: 0x" + "a" * 64)
-        assert code == 0
-        if result:
-            assert result.get("decision") != "block"
+        assert code == 0 and result is not None
+        assert result["decision"] == "block"
 
     def test_empty_prompt_allowed(self):
         result, code, _ = self._run_prompt_hook("")

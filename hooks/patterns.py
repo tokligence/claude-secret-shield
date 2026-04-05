@@ -405,11 +405,13 @@ SECRET_PATTERNS = [
     # Ethereum / EVM private key — context-based to avoid matching tx hashes, addresses, etc.
     # Matches: private_key = "0x...", privateKey: "0x...", wallet_secret=0x..., etc.
     ("WALLET_PRIVATE_KEY", r'(?i)(?:private[_-]?key|secret[_-]?key|wallet[_-]?(?:secret|private|key)|sign(?:ing|er)[_-]?key|deployer[_-]?key|owner[_-]?key|account[_-]?key|eth(?:ereum)?[_-]?(?:private[_-]?)?key|hot[_-]?wallet[_-]?key|cold[_-]?wallet[_-]?key)["\']?\s*[:=]\s*["\']?(?:0x)?[a-fA-F0-9]{64}["\']?'),
-    # Catch-all: any quoted 0x + 64 hex string in an assignment context.
+    # Catch-all for 0x + 64 hex strings. Matches both:
+    #   - Quoted assignments: key = "0xabc..." (common in config files)
+    #   - Bare occurrences: 0xabc... (catches raw pastes in prompts)
     # Uses a neutral name so the LLM treats it as an opaque credential without assuming type.
-    # This catches private keys that lack specific keywords (e.g. `key = "0xabc..."`).
-    # Note: will also match tx hashes / bytes32 in assignments — users can allowlist via .claude-redact-ignore.
-    ("HEX_CREDENTIAL", r'(?i)(?:\w+)["\']?\s*[:=]\s*["\']0x[a-fA-F0-9]{64}["\']'),
+    # Higher false-positive rate (tx hashes, bytes32) but private key leaks are too costly
+    # to miss. Users can allowlist specific files via .claude-redact-ignore.
+    ("HEX_CREDENTIAL", r'\b0x[a-fA-F0-9]{64}\b'),
     # BIP39 mnemonic / seed phrase — context-based to avoid matching normal English text
     ("WALLET_MNEMONIC", r'(?i)(?:mnemonic|seed[_-]?phrase|recovery[_-]?phrase|hd[_-]?wallet|wallet[_-]?words|secret[_-]?phrase|backup[_-]?phrase)["\']?\s*[:=]\s*["\']?[a-z]+(?:\s+[a-z]+){11,23}["\']?'),
     # Bitcoin WIF (Wallet Import Format) — distinctive prefix makes it low false-positive

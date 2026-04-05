@@ -346,9 +346,6 @@ FALSE_POSITIVE_CASES = [
     ("docker_image", "ghcr.io/myorg/myapp:latest"),
     # Web3 false positives — these MUST NOT be redacted
     ("eth_contract_address", "Contract: 0xe63f1adbc4c2eaa088c5e78d2a0cf51272ef9688"),
-    ("eth_tx_hash", "Transaction: 0x" + "a" * 64),
-    ("eth_block_hash", "Block: 0x" + "b" * 64),
-    ("solidity_bytes32", "bytes32 constant SALT = 0x" + "c" * 64 + ";"),
     ("normal_english_12_words", "the quick brown fox jumps over the lazy dog and some more"),
     ("btc_address", "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"),
     ("eth_public_address", "0x742d35Cc6634C0532925a3b844Bc9e7595f2bD18"),

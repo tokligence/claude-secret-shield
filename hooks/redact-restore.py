@@ -606,17 +606,25 @@ try:
 
         debug_log(f"Found {len(matches)} secret match(es)")
 
-        # Sort by start position descending (replace from end to avoid position shifting)
-        matches.sort(key=lambda x: x[0], reverse=True)
+        # Sort: longest match first, then by start position descending.
+        # This ensures more specific (longer) patterns win over shorter catch-all patterns
+        # when their ranges overlap.
+        matches.sort(key=lambda x: (-(x[1] - x[0]), -x[0]))
 
-        # Deduplicate overlapping matches and replace from end to start
-        result = content
+        # Deduplicate: keep longest matches, skip any shorter overlapping match.
+        kept = []
         used_ranges = []
         for start, end, secret, placeholder in matches:
             if any(start < ue and end > us for us, ue in used_ranges):
                 continue  # Skip overlapping
-            result = result[:start] + placeholder + result[end:]
+            kept.append((start, end, secret, placeholder))
             used_ranges.append((start, end))
+
+        # Replace from end to start (by position) to avoid position shifting
+        kept.sort(key=lambda x: x[0], reverse=True)
+        result = content
+        for start, end, secret, placeholder in kept:
+            result = result[:start] + placeholder + result[end:]
 
         return result, True
 
