@@ -1488,6 +1488,51 @@ class TestWeb3Patterns:
             os.unlink(f)
 
 
+    def test_hex_credential_catches_bare_key(self, sid):
+        """Quoted 0x+64hex in assignment without specific keyword should be caught by HEX_CREDENTIAL."""
+        hex_key = "0x" + "a" * 64
+        orig = f'key = "{hex_key}"\n'
+        f = _tmp(orig)
+        try:
+            run_hook("Read", {"file_path": f}, sid)
+            with open(f) as fh:
+                red = fh.read()
+            assert hex_key not in red, "HEX_CREDENTIAL should catch bare quoted hex in assignment"
+            assert _ph_prefix("HEX_CREDENTIAL") in red or _ph_prefix("WALLET_PRIVATE_KEY") in red
+            run_hook("Read", {"file_path": f}, sid, is_post=True)
+        finally:
+            os.unlink(f)
+
+    def test_hex_credential_unquoted_not_matched(self, sid):
+        """Unquoted 0x+64hex should NOT be caught (reduces Solidity false positives)."""
+        hex_str = "0x" + "a" * 64
+        orig = f"bytes32 constant SALT = {hex_str};\n"
+        f = _tmp(orig)
+        try:
+            run_hook("Read", {"file_path": f}, sid)
+            with open(f) as fh:
+                red = fh.read()
+            assert "HEX_CREDENTIAL" not in red, "Unquoted hex should not trigger HEX_CREDENTIAL"
+            run_hook("Read", {"file_path": f}, sid, is_post=True)
+        finally:
+            os.unlink(f)
+
+    def test_wallet_private_key_wins_over_hex_credential(self, sid):
+        """When context keyword exists, WALLET_PRIVATE_KEY should match (higher priority)."""
+        hex_key = "0x" + "c" * 64
+        orig = f'private_key = "{hex_key}"\n'
+        f = _tmp(orig)
+        try:
+            run_hook("Read", {"file_path": f}, sid)
+            with open(f) as fh:
+                red = fh.read()
+            assert hex_key not in red
+            assert _ph_prefix("WALLET_PRIVATE_KEY") in red, "WALLET_PRIVATE_KEY should win over HEX_CREDENTIAL"
+            run_hook("Read", {"file_path": f}, sid, is_post=True)
+        finally:
+            os.unlink(f)
+
+
 class TestWeb3BlockList:
     """Test that Web3 config files are blocked."""
 

@@ -283,6 +283,7 @@ PATTERN_TEST_CASES = [
     # WEB3 / CRYPTO WALLETS
     # ================================================================
     ("WALLET_PRIVATE_KEY", 'private_key = "0x' + "a" * 64 + '"'),
+    ("HEX_CREDENTIAL", 'key = "0x' + "a" * 64 + '"'),
     ("WALLET_MNEMONIC", 'mnemonic = "' + " ".join(["abandon", "ability", "able", "about", "above", "absent", "absorb", "abstract", "absurd", "abuse", "access", "accident"]) + '"'),
     ("BTC_PRIVATE_KEY", "5" + "H" * 50),  # uncompressed WIF (51 chars)
     # Note: compressed WIF (K/L prefix, 52 chars) also tested via BTC test below
@@ -351,7 +352,6 @@ FALSE_POSITIVE_CASES = [
     ("normal_english_12_words", "the quick brown fox jumps over the lazy dog and some more"),
     ("btc_address", "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"),
     ("eth_public_address", "0x742d35Cc6634C0532925a3b844Bc9e7595f2bD18"),
-    ("camel_case_non_wallet_key", 'someKey = "0x' + "E" * 64 + '"'),
 ]
 
 
