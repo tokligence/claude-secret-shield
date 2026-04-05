@@ -1537,6 +1537,66 @@ class TestWeb3Patterns:
             os.unlink(f)
 
 
+    def test_bare_hex_suppressed_when_many_matches(self, sid):
+        """When >3 bare HEX_CREDENTIAL_BARE matches in a file, bare matches are suppressed."""
+        # File with 5 bare hex values (no context keywords) — should exceed threshold
+        lines = []
+        for i in range(5):
+            hex_val = "0xab" + format(i, '062x')
+            lines.append(f"hash{i} {hex_val}")
+        orig = "\n".join(lines) + "\n"
+        f = _tmp(orig)
+        try:
+            run_hook("Read", {"file_path": f}, sid)
+            with open(f) as fh:
+                red = fh.read()
+            # Bare hex should NOT be redacted (suppressed by threshold)
+            assert "HEX_CREDENTIAL_BARE" not in red, "Bare hex should be suppressed when >3 matches"
+            # The bare hex values should still be in the file (not redacted)
+            assert "0xab" in red, "Bare hex values should pass through when suppressed"
+            run_hook("Read", {"file_path": f}, sid, is_post=True)
+        finally:
+            os.unlink(f)
+
+    def test_bare_hex_not_suppressed_when_few_matches(self, sid):
+        """When <=3 bare HEX_CREDENTIAL_BARE matches, they are redacted normally."""
+        hex_val = "0x" + "a" * 64
+        orig = f"Check this: {hex_val}\n"
+        f = _tmp(orig)
+        try:
+            run_hook("Read", {"file_path": f}, sid)
+            with open(f) as fh:
+                red = fh.read()
+            assert hex_val not in red, "Single bare hex should be redacted"
+            run_hook("Read", {"file_path": f}, sid, is_post=True)
+        finally:
+            os.unlink(f)
+
+    def test_context_hex_not_suppressed_even_with_many_bare(self, sid):
+        """Context-based HEX_CREDENTIAL is never suppressed, even when bare exceeds threshold."""
+        lines = []
+        # 5 bare hex values (will trigger threshold suppression for bare)
+        for i in range(5):
+            hex_val = "0xab" + format(i, '062x')
+            lines.append(f"item{i} {hex_val}")
+        # 1 context-based match (should always be redacted)
+        lines.append('private_key = "0x' + 'f' * 64 + '"')
+        orig = "\n".join(lines) + "\n"
+        f = _tmp(orig)
+        try:
+            run_hook("Read", {"file_path": f}, sid)
+            with open(f) as fh:
+                red = fh.read()
+            # Context-based match should be redacted
+            assert "0x" + "f" * 64 not in red, "Context-based key should still be redacted"
+            assert _ph_prefix("WALLET_PRIVATE_KEY") in red
+            # Bare hex should NOT be redacted (suppressed)
+            assert "0xab" in red, "Bare hex should pass through (threshold exceeded)"
+            run_hook("Read", {"file_path": f}, sid, is_post=True)
+        finally:
+            os.unlink(f)
+
+
 class TestWeb3BlockList:
     """Test that Web3 config files are blocked."""
 
@@ -1843,6 +1903,176 @@ class TestPassCommand:
 
         # Next should be blocked
         result, _, _ = self._run_prompt_hook(f"Next {hex_key}", session_id=sid, cwd=tmp_path)
+        assert result is not None and result["decision"] == "block"
+
+
+    def test_pass_capped_at_100(self, tmp_path):
+        """pass with huge number is capped at 100."""
+        sid = "pass-test-cap"
+        self._cleanup_session_state(sid)
+        hex_key = "0x" + "a" * 64
+
+        result, _, _ = self._run_prompt_hook(f"Check {hex_key}", session_id=sid, cwd=tmp_path)
+        assert result["decision"] == "block"
+
+        result, _, _ = self._run_prompt_hook("pass 99999", session_id=sid, cwd=tmp_path)
+        assert result is not None
+        # Should work (capped to 100), verify by checking state
+        import hashlib
+        state_key = f"{sid}::main"
+        session_hash = hashlib.sha256(state_key.encode("utf-8")).hexdigest()[:16]
+        state_path = os.path.join(tempfile.gettempdir(), f".claude-secret-shield-{session_hash}.json")
+        with open(state_path) as f:
+            state = json.load(f)
+        assert state["pass_remaining"] <= 99, f"pass_remaining should be capped, got {state['pass_remaining']}"
+        # Cleanup
+        os.remove(state_path)
+
+
+    def test_pass_0_treated_as_pass_1(self, tmp_path):
+        """pass 0 is silently promoted to pass 1 (allows current only)."""
+        sid = "pass-test-0"
+        self._cleanup_session_state(sid)
+        hex_key = "0x" + "a" * 64
+
+        result, _, _ = self._run_prompt_hook(f"Check {hex_key}", session_id=sid, cwd=tmp_path)
+        assert result["decision"] == "block"
+
+        result, _, _ = self._run_prompt_hook("pass 0", session_id=sid, cwd=tmp_path)
+        assert result is not None
+        extra = result.get("hookSpecificOutput", {}).get("additionalContext", "")
+        assert hex_key in extra  # current prompt allowed
+
+        # Next should be blocked
+        result, _, _ = self._run_prompt_hook(f"Next {hex_key}", session_id=sid, cwd=tmp_path)
+        assert result is not None and result["decision"] == "block"
+
+    def test_pass_negative_not_matched(self, tmp_path):
+        """pass -1 does not match the pass regex (negative numbers rejected)."""
+        sid = "pass-test-neg"
+        self._cleanup_session_state(sid)
+        hex_key = "0x" + "a" * 64
+
+        result, _, _ = self._run_prompt_hook(f"Check {hex_key}", session_id=sid, cwd=tmp_path)
+        assert result["decision"] == "block"
+
+        # "pass -1" should NOT match pass regex (\d+ doesn't match -)
+        result, code, _ = self._run_prompt_hook("pass -1", session_id=sid, cwd=tmp_path)
+        # Should be treated as a regular prompt (not a pass command), no additionalContext
+        assert code == 0
+        if result:
+            assert "additionalContext" not in result.get("hookSpecificOutput", {})
+
+    def test_pass_with_extra_whitespace(self, tmp_path):
+        """pass with leading/trailing whitespace should work."""
+        sid = "pass-test-ws"
+        self._cleanup_session_state(sid)
+        hex_key = "0x" + "a" * 64
+
+        result, _, _ = self._run_prompt_hook(f"Check {hex_key}", session_id=sid, cwd=tmp_path)
+        assert result["decision"] == "block"
+
+        result, _, _ = self._run_prompt_hook("  pass  ", session_id=sid, cwd=tmp_path)
+        assert result is not None
+        extra = result.get("hookSpecificOutput", {}).get("additionalContext", "")
+        assert hex_key in extra
+
+    def test_consecutive_pass_overrides(self, tmp_path):
+        """Second pass command overrides the first pass counter."""
+        sid = "pass-test-override"
+        self._cleanup_session_state(sid)
+        hex_key = "0x" + "b" * 64
+
+        # Block and pass 2
+        result, _, _ = self._run_prompt_hook(f"First {hex_key}", session_id=sid, cwd=tmp_path)
+        assert result["decision"] == "block"
+        self._run_prompt_hook("pass 2", session_id=sid, cwd=tmp_path)
+
+        # Use the 1 remaining pass
+        result, code, _ = self._run_prompt_hook(f"Second {hex_key}", session_id=sid, cwd=tmp_path)
+        assert code == 0
+        if result:
+            assert result.get("decision") != "block"
+
+        # Next should be blocked (pass 2 expired: current + 1 more = 2 total)
+        result, _, _ = self._run_prompt_hook(f"Third {hex_key}", session_id=sid, cwd=tmp_path)
+        assert result is not None and result["decision"] == "block"
+
+        # Now pass 5 to override
+        self._run_prompt_hook("pass 5", session_id=sid, cwd=tmp_path)
+
+        # Should have 4 remaining
+        for i in range(4):
+            result, code, _ = self._run_prompt_hook(f"P{i} {hex_key}", session_id=sid, cwd=tmp_path)
+            assert code == 0
+            if result:
+                assert result.get("decision") != "block", f"Prompt {i} should be allowed"
+
+        # 5th after override should be blocked
+        result, _, _ = self._run_prompt_hook(f"Final {hex_key}", session_id=sid, cwd=tmp_path)
+        assert result is not None and result["decision"] == "block"
+
+    def test_pass_off_then_new_session_resets(self, tmp_path):
+        """pass off state does not leak to a different session ID."""
+        sid1 = "pass-off-session-1"
+        sid2 = "pass-off-session-2"
+        self._cleanup_session_state(sid1)
+        self._cleanup_session_state(sid2)
+        hex_key = "0x" + "c" * 64
+
+        # Set pass off for session 1
+        result, _, _ = self._run_prompt_hook(f"Msg {hex_key}", session_id=sid1, cwd=tmp_path)
+        assert result["decision"] == "block"
+        self._run_prompt_hook("pass off", session_id=sid1, cwd=tmp_path)
+
+        # Session 2 should still block (different session ID)
+        result, _, _ = self._run_prompt_hook(f"Msg {hex_key}", session_id=sid2, cwd=tmp_path)
+        assert result is not None and result["decision"] == "block", "pass off should not leak to other sessions"
+
+    def test_pass_when_tmp_file_deleted(self, tmp_path):
+        """pass when the tmp_secrets file has been externally deleted is a no-op."""
+        sid = "pass-test-deleted"
+        self._cleanup_session_state(sid)
+        hex_key = "0x" + "d" * 64
+
+        result, _, _ = self._run_prompt_hook(f"Msg {hex_key}", session_id=sid, cwd=tmp_path)
+        assert result["decision"] == "block"
+
+        # Delete the tmp_secrets file manually
+        import glob
+        for f in glob.glob(str(tmp_path / ".tmp_secrets.*.conf")):
+            os.remove(f)
+
+        # pass should not crash, just be a no-op
+        result, code, _ = self._run_prompt_hook("pass", session_id=sid, cwd=tmp_path)
+        assert code == 0  # no crash
+
+    def test_prompt_scanning_with_pass_remaining_during_bare_hex(self, tmp_path):
+        """Bare hex in prompt is allowed when pass_remaining > 0."""
+        sid = "pass-bare-prompt"
+        self._cleanup_session_state(sid)
+        hex_key = "0x" + "e" * 64
+
+        # Block first
+        result, _, _ = self._run_prompt_hook(f"Hash: {hex_key}", session_id=sid, cwd=tmp_path)
+        assert result["decision"] == "block"
+
+        # pass 3
+        self._run_prompt_hook("pass 3", session_id=sid, cwd=tmp_path)
+
+        # Next 2 bare hex prompts should be allowed
+        result, code, _ = self._run_prompt_hook(f"TX: {hex_key}", session_id=sid, cwd=tmp_path)
+        assert code == 0
+        if result:
+            assert result.get("decision") != "block"
+
+        result, code, _ = self._run_prompt_hook(f"Block: {hex_key}", session_id=sid, cwd=tmp_path)
+        assert code == 0
+        if result:
+            assert result.get("decision") != "block"
+
+        # 3rd should be blocked (pass expired)
+        result, _, _ = self._run_prompt_hook(f"Another: {hex_key}", session_id=sid, cwd=tmp_path)
         assert result is not None and result["decision"] == "block"
 
     def test_go_still_works_alongside_pass(self, tmp_path):

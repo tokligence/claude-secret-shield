@@ -481,7 +481,7 @@ try:
                     pass_count = -1  # sentinel: disabled for session
                     debug_log("UserPromptSubmit: 'pass off' — disabling prompt scanning for session")
                 elif arg:
-                    pass_count = max(int(arg), 1)
+                    pass_count = min(max(int(arg), 1), 100)
                     debug_log(f"UserPromptSubmit: 'pass {pass_count}' — allowing {pass_count} prompts")
                 else:
                     pass_count = 1  # pass = pass 1
@@ -684,10 +684,24 @@ try:
                 if len(matched_value) < 8:
                     continue
                 placeholder = get_placeholder(mapping, matched_value, pattern_name)
-                matches.append((m.start(), m.end(), matched_value, placeholder))
+                matches.append((m.start(), m.end(), matched_value, placeholder, pattern_name))
 
         if not matches:
             return content, False
+
+        # Auto-suppress HEX_CREDENTIAL_BARE if too many matches in one file.
+        # This indicates a Web3 project with many tx hashes / bytes32 values.
+        BARE_HEX_THRESHOLD = 3
+        bare_count = sum(1 for *_, name in matches if name == "HEX_CREDENTIAL_BARE")
+        if bare_count > BARE_HEX_THRESHOLD:
+            debug_log(
+                f"HEX_CREDENTIAL_BARE: {bare_count} matches exceed threshold ({BARE_HEX_THRESHOLD}), "
+                f"suppressing bare hex matches for this file. "
+                f"Add files to .claude-redact-ignore to skip scanning entirely."
+            )
+            matches = [m for m in matches if m[4] != "HEX_CREDENTIAL_BARE"]
+            if not matches:
+                return content, False
 
         debug_log(f"Found {len(matches)} secret match(es)")
 
@@ -699,7 +713,7 @@ try:
         # Deduplicate: keep longest matches, skip any shorter overlapping match.
         kept = []
         used_ranges = []
-        for start, end, secret, placeholder in matches:
+        for start, end, secret, placeholder, _name in matches:
             if any(start < ue and end > us for us, ue in used_ranges):
                 continue  # Skip overlapping
             kept.append((start, end, secret, placeholder))

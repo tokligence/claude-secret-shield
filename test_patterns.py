@@ -284,6 +284,7 @@ PATTERN_TEST_CASES = [
     # ================================================================
     ("WALLET_PRIVATE_KEY", 'private_key = "0x' + "a" * 64 + '"'),
     ("HEX_CREDENTIAL", 'key = "0x' + "a" * 64 + '"'),
+    ("HEX_CREDENTIAL_BARE", "0x" + "a" * 64),
     ("WALLET_MNEMONIC", 'mnemonic = "' + " ".join(["abandon", "ability", "able", "about", "above", "absent", "absorb", "abstract", "absurd", "abuse", "access", "accident"]) + '"'),
     ("BTC_PRIVATE_KEY", "5" + "H" * 50),  # uncompressed WIF (51 chars)
     # Note: compressed WIF (K/L prefix, 52 chars) also tested via BTC test below
