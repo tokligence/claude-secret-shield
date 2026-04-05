@@ -2437,6 +2437,51 @@ class TestSecretManagerBashWrapping:
         assert c == 0 and o is not None
         assert "mask-output.py" in o["hookSpecificOutput"]["updatedInput"]["command"]
 
+
+    def test_semicolon_chain_denied(self, sid):
+        """Secret manager command chained with ; should be denied."""
+        o, c, _ = run_hook("Bash", {"command": "aws secretsmanager get-secret-value --secret-id x ; echo done"}, sid)
+        assert c == 0 and o is not None
+        assert o["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+    def test_and_chain_denied(self, sid):
+        """Secret manager command chained with && should be denied."""
+        o, c, _ = run_hook("Bash", {"command": "aws secretsmanager get-secret-value --secret-id x && echo done"}, sid)
+        assert c == 0 and o is not None
+        assert o["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+    def test_or_chain_denied(self, sid):
+        """Secret manager command chained with || should be denied."""
+        o, c, _ = run_hook("Bash", {"command": "aws secretsmanager get-secret-value --secret-id x || echo fallback"}, sid)
+        assert c == 0 and o is not None
+        assert o["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+    def test_redirect_no_space_denied(self, sid):
+        """Redirect without space (>/path) should be denied."""
+        o, c, _ = run_hook("Bash", {"command": "aws secretsmanager get-secret-value --secret-id x >/tmp/out.json"}, sid)
+        assert c == 0 and o is not None
+        assert o["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+    def test_append_redirect_denied(self, sid):
+        """Append redirect (>>) should be denied."""
+        o, c, _ = run_hook("Bash", {"command": "aws secretsmanager get-secret-value --secret-id x >> /tmp/out.json"}, sid)
+        assert c == 0 and o is not None
+        assert o["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+    def test_pipe_inside_quotes_allowed(self, sid):
+        """Pipe inside quoted argument should NOT be denied."""
+        o, c, _ = run_hook("Bash", {"command": "aws secretsmanager get-secret-value --secret-id 'name|with|pipes'"}, sid)
+        assert c == 0 and o is not None
+        # Should be allowed (wrapped with mask), not denied
+        assert "mask-output.py" in o["hookSpecificOutput"].get("updatedInput", {}).get("command", "")
+
+    def test_stderr_redirect_allowed(self, sid):
+        """2>&1 should NOT be treated as output redirect."""
+        o, c, _ = run_hook("Bash", {"command": "aws secretsmanager get-secret-value --secret-id x 2>&1"}, sid)
+        assert c == 0 and o is not None
+        # Should be allowed (wrapped with mask), not denied
+        assert "mask-output.py" in o["hookSpecificOutput"].get("updatedInput", {}).get("command", "")
+
     def test_no_double_wrap(self, sid):
         """If command already contains mask-output.py, don't wrap again."""
         cmd = f"aws secretsmanager get-secret-value --secret-id x | python3 {self.MASK_SCRIPT}"

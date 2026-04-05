@@ -1176,18 +1176,23 @@ try:
             if MASK_SCRIPT in command:
                 sys.exit(0)
 
-            # DENY if command has pipes, redirects, or command substitution — these can
-            # bypass masking by transforming or exfiltrating output before the mask runs.
-            has_pipe = bool(re.search(r'(?<!\|)\|(?!\|)', command))  # | but not ||
-            has_redirect = bool(re.search(r'[^2]?>{1,2}\s', command) or re.search(r'\btee\b', command))
-            has_subshell = bool(re.search(r'\$\(', command) or '`' in command)
+            # DENY if command has pipes, redirects, command substitution, or chaining —
+            # these can bypass masking by transforming or exfiltrating output.
+            # Note: we check outside quotes to reduce false positives on args like --secret-id 'a|b'.
+            # Strip single/double-quoted segments before checking for shell operators.
+            stripped = re.sub(r"'[^']*'|\"[^\"]*\"", "", command)
 
-            if has_pipe:
+            has_pipe = bool(re.search(r'(?<!\|)\|(?!\|)', stripped))  # | but not ||
+            has_redirect = bool(re.search(r'(?<![2&])>{1,2}', stripped) or re.search(r'\btee\b', stripped))
+            has_subshell = bool(re.search(r'\$\(', stripped) or '`' in stripped)
+            has_chain = bool(re.search(r';|&&|\|\|', stripped))
+
+            if has_pipe or has_chain:
                 deny(
-                    "BLOCKED: This command reads cloud secrets but contains a pipe (|). "
-                    "Remove all pipes and run the secret manager command directly — "
+                    "BLOCKED: This command reads cloud secrets but contains a pipe or command chain (|, &&, ;). "
+                    "Run the secret manager command alone without pipes or chaining — "
                     "claude-secret-shield will automatically mask sensitive values in the output. "
-                    "You can process the masked output afterwards."
+                    "You can process the masked output in a separate command afterwards."
                 )
             if has_redirect:
                 deny(
