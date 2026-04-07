@@ -114,12 +114,41 @@ SECRET_PATTERNS = [
     # CLOUD PROVIDERS
     # ================================================================
 
-    # AWS
+    # AWS — credentials
     ("AWS_ACCESS_KEY", r'(?:A3T[A-Z0-9]|AKIA|ASIA|ABIA|ACCA)[A-Z2-7]{16}'),
     ("AWS_SECRET_KEY", r'(?i)(?:aws_?secret_?access_?key|secret_?access_?key|SecretAccessKey)["\']?\s*[:=]\s*["\']?[A-Za-z0-9/+=]{40}["\']?'),
     ("AWS_SESSION_TOKEN", r'(?i)(?:aws_?session_?token|aws_?security_?token|session_?token|security_?token|SessionToken)["\']?\s*[:=]\s*["\']?[A-Za-z0-9/+=]{40,}["\']?'),
+    # AWS — resource ARNs (account ID + resource name leak org structure and naming conventions)
+    # Matches: arn:aws:secretsmanager:region:123456789012:secret:my/path-suffix
+    ("AWS_SECRETSMANAGER_ARN", r'arn:aws[a-z-]*:secretsmanager:[a-z0-9-]+:\d{12}:secret:[A-Za-z0-9/_+=.@!\-]+'),
+    # Matches: arn:aws:rds:region:123456789012:cluster:name  or  cluster-snapshot:name
+    ("AWS_RDS_ARN", r'arn:aws[a-z-]*:rds:[a-z0-9-]+:\d{12}:(?:cluster|cluster-snapshot|db|snapshot|cluster-endpoint):[A-Za-z0-9_!:/\-]+'),
+    # Matches: arn:aws:kms:region:123456789012:key/uuid  or  alias/name
+    ("AWS_KMS_ARN", r'arn:aws[a-z-]*:kms:[a-z0-9-]+:\d{12}:(?:key|alias)/[A-Za-z0-9_/\-]+'),
+    # Matches: arn:aws:iam::123456789012:role/path/name  or  user/name  or  policy/name
+    ("AWS_IAM_ARN", r'arn:aws[a-z-]*:iam::\d{12}:(?:role|user|policy|instance-profile|group|saml-provider|oidc-provider|server-certificate)[/:][A-Za-z0-9+=,.@_/\-]+'),
+    # Matches: arn:aws:s3:::bucket-name/key (no region, no account)
+    ("AWS_S3_ARN", r'arn:aws[a-z-]*:s3:::[a-z0-9.\-]{3,63}(?:/[A-Za-z0-9_!.*\'()/\-]*)?'),
+    # Matches: arn:aws:lambda:region:123456789012:function:name
+    ("AWS_LAMBDA_ARN", r'arn:aws[a-z-]*:lambda:[a-z0-9-]+:\d{12}:function:[A-Za-z0-9_\-]+(?::\$LATEST|:[A-Za-z0-9_\-]+)?'),
+    # Matches: arn:aws:ecs:region:123456789012:task-definition/name:revision  / cluster/name / service/cluster/name
+    ("AWS_ECS_ARN", r'arn:aws[a-z-]*:ecs:[a-z0-9-]+:\d{12}:(?:task-definition|cluster|service|task|container-instance)/[A-Za-z0-9_/\-]+(?::\d+)?'),
+    # Generic ARN catchall (account ID is the sensitive bit)
+    ("AWS_GENERIC_ARN", r'arn:aws[a-z-]*:[a-z0-9-]+:[a-z0-9-]*:\d{12}:[A-Za-z0-9_/:.@*\-]+'),
+    # Bare account ID in AWS contexts (12 digits after account-id label)
+    ("AWS_ACCOUNT_ID", r'(?i)(?:aws[_-]?account[_-]?(?:id|number)|caller[_-]?account|aws[_-]?owner[_-]?id)["\']?\s*[:=]\s*["\']?\d{12}["\']?'),
+    # ECR registry URI: 123456789012.dkr.ecr.region.amazonaws.com
+    ("AWS_ECR_REGISTRY", r'\d{12}\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com(?:/[A-Za-z0-9_/.\-]+)?'),
+    # RDS endpoint: cluster-id.cluster-xxx.region.rds.amazonaws.com  (cluster-xxx is the resource id, leaks)
+    ("AWS_RDS_ENDPOINT", r'[a-z0-9-]+\.cluster-[a-z0-9]+\.[a-z0-9-]+\.rds\.amazonaws\.com(?::\d+)?'),
     # Azure
     ("AZURE_STORAGE_KEY", r'(?i)(?:DefaultEndpointsProtocol|AccountKey)\s*=\s*[A-Za-z0-9+/=]{86,88}'),
+    # Azure resource IDs (subscription ID + resource group + name leak structure)
+    ("AZURE_RESOURCE_ID", r'/subscriptions/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/resourceGroups/[A-Za-z0-9_\-.()]+(?:/providers/[A-Za-z0-9_/.\-]+)?'),
+    ("AZURE_SUBSCRIPTION_ID", r'(?i)(?:subscription[_-]?id|azure[_-]?sub(?:scription)?)["\']?\s*[:=]\s*["\']?[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}["\']?'),
+    ("AZURE_TENANT_ID", r'(?i)(?:tenant[_-]?id|azure[_-]?tenant|aad[_-]?tenant)["\']?\s*[:=]\s*["\']?[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}["\']?'),
+    ("AZURE_KEYVAULT_URI", r'https://[a-z0-9\-]+\.vault\.azure\.net(?:/[A-Za-z0-9/_\-]+)?'),
+    ("AZURE_STORAGE_URL", r'https://[a-z0-9]{3,24}\.(?:blob|file|queue|table|dfs)\.core\.windows\.net(?:/[A-Za-z0-9/_\-]*)?'),
     # DigitalOcean
     ("DIGITALOCEAN_PAT", r'dop_v1_[a-f0-9]{64}'),
     ("DIGITALOCEAN_OAUTH", r'doo_v1_[a-f0-9]{64}'),
@@ -130,6 +159,11 @@ SECRET_PATTERNS = [
     ("TENCENT_SECRET_ID", r'AKID[A-Za-z0-9]{32}'),
     # GCP service account private key id
     ("GCP_SA_PRIVATE_KEY_ID", r'"private_key_id"\s*:\s*"[a-f0-9]{40}"'),
+    # GCP resource paths (project ID + resource leak structure)
+    ("GCP_SECRET_NAME", r'projects/[a-z][a-z0-9\-]{4,28}[a-z0-9]/' + 'secrets' + r'/[A-Za-z0-9_\-]+(?:/versions/[a-zA-Z0-9_\-]+)?'),
+    ("GCP_KMS_KEY", r'projects/[a-z][a-z0-9\-]{4,28}[a-z0-9]/locations/[a-z0-9\-]+/keyRings/[A-Za-z0-9_\-]+/cryptoKeys/[A-Za-z0-9_\-]+(?:/cryptoKeyVersions/\d+)?'),
+    ("GCP_SA_EMAIL", r'[a-z][a-z0-9\-]{4,28}[a-z0-9]@[a-z][a-z0-9\-]{4,28}[a-z0-9]\.iam\.gserviceaccount\.com'),
+    ("GCP_PROJECT_ID", r'(?i)(?:gcp[_-]?project[_-]?id|google[_-]?project[_-]?id|gcloud[_-]?project)["\']?\s*[:=]\s*["\']?[a-z][a-z0-9\-]{4,28}[a-z0-9]["\']?'),
     # Azure AD app secret
     ("AZURE_AD_SECRET", r'(?i)(?:azure|ad|aad)[_-]?(?:client)?[_-]?secret["\']?\s*[:=]\s*["\']?~[A-Za-z0-9_~.-]{34}["\']?'),
     # Azure SQL connection string

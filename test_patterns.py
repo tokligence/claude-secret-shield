@@ -107,6 +107,18 @@ PATTERN_TEST_CASES = [
     ("AWS_ACCESS_KEY", "AKIA" + "A" * 16),
     ("AWS_SECRET_KEY", 'SecretAccessKey = "' + "A" * 40 + '"'),
     ("AWS_SESSION_TOKEN", '"SessionToken": "' + "A" * 100 + '"'),
+    # AWS resource ARNs (account ID + resource name leak structure)
+    ("AWS_SECRETSMANAGER_ARN", "arn:aws:secretsmanager:us-east-1:123456789012:" + "secret" + ":prod/db-pwd-AbCdEf"),
+    ("AWS_RDS_ARN", "arn:aws:rds:us-east-1:123456789012:cluster:my-prod-cluster"),
+    ("AWS_KMS_ARN", "arn:aws:kms:us-east-1:123456789012:key/12345678-1234-1234-1234-123456789012"),
+    ("AWS_IAM_ARN", "arn:aws:iam::123456789012:role/MyServiceRole"),
+    ("AWS_S3_ARN", "arn:aws:s3:::my-private-bucket/path/to/object.txt"),
+    ("AWS_LAMBDA_ARN", "arn:aws:lambda:us-east-1:123456789012:function:my-function"),
+    ("AWS_ECS_ARN", "arn:aws:ecs:us-east-1:123456789012:task-definition/my-task:42"),
+    ("AWS_GENERIC_ARN", "arn:aws:dynamodb:us-east-1:123456789012:table/MyTable"),
+    ("AWS_ACCOUNT_ID", 'aws_account_id = "123456789012"'),
+    ("AWS_ECR_REGISTRY", "123456789012.dkr.ecr.us-east-1.amazonaws.com/my-repo:latest"),
+    ("AWS_RDS_ENDPOINT", "myapp-db.cluster-abc123.us-east-1.rds.amazonaws.com:5432"),
     ("AZURE_STORAGE_KEY", "DefaultEndpointsProtocol = " + "A" * 86),
     ("DIGITALOCEAN_PAT", "dop_v1_" + "a" * 64),
     ("DIGITALOCEAN_OAUTH", "doo_v1_" + "a" * 64),
@@ -114,6 +126,17 @@ PATTERN_TEST_CASES = [
     ("ALIBABA_ACCESS_KEY", "LTAI" + "A" * 20),
     ("TENCENT_SECRET_ID", "AKID" + "A" * 32),
     ("GCP_SA_PRIVATE_KEY_ID", '"private_key_id": "' + "a" * 40 + '"'),
+    # GCP resource paths
+    ("GCP_SECRET_NAME", "projects/my-prod-project/" + "secrets" + "/db-pwd/versions/latest"),
+    ("GCP_KMS_KEY", "projects/my-prod-project/locations/us-central1/keyRings/my-ring/cryptoKeys/my-key"),
+    ("GCP_SA_EMAIL", "myapp-runner@my-prod-project.iam.gserviceaccount.com"),
+    ("GCP_PROJECT_ID", 'gcp_project_id = "my-prod-project"'),
+    # Azure resource IDs
+    ("AZURE_RESOURCE_ID", "/subscriptions/12345678-1234-1234-1234-123456789012/resourceGroups/my-rg/providers/Microsoft.Storage/storageAccounts/myacct"),
+    ("AZURE_SUBSCRIPTION_ID", 'subscription_id = "12345678-1234-1234-1234-123456789012"'),
+    ("AZURE_TENANT_ID", 'tenant_id = "12345678-1234-1234-1234-123456789012"'),
+    ("AZURE_KEYVAULT_URI", "https://myvault.vault.azure.net/secrets/db-pwd/abc123"),
+    ("AZURE_STORAGE_URL", "https://myacct.blob.core.windows.net/container/file.txt"),
     ("AZURE_AD_SECRET", 'azure_client_secret = "~' + "A" * 34 + '"'),
     ("AZURE_SQL_CONN", "Server=myserver.database.windows.net;Password=" + "fakepassword123" + ""),
     ("IBM_CLOUD_KEY", 'ibm_cloud_api_key = "' + "A" * 44 + '"'),
@@ -350,6 +373,24 @@ FALSE_POSITIVE_CASES = [
     ("normal_english_12_words", "the quick brown fox jumps over the lazy dog and some more"),
     ("btc_address", "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"),
     ("eth_public_address", "0x742d35Cc6634C0532925a3b844Bc9e7595f2bD18"),
+
+    # AWS resource ID false positives — generic 12-digit numbers should NOT match AWS_ACCOUNT_ID
+    ("phone_number", "phone = 12345678901"),
+    ("db_row_id", "id = 100000000001"),
+    ("generic_account_id", "account_id = 555000111222"),  # not AWS context
+    ("github_repo_url", "https://github.com/myorg/myrepo/blob/main/README.md"),
+    ("normal_s3_url", "https://example.com/bucket/file"),  # not arn:aws:s3
+    ("rds_word_in_text", "we are using RDS for our database backend"),
+
+    # GCP false positives
+    ("project_id_jira", "project_id = JIRA-123"),  # generic project_id, not GCP
+    ("github_project_id", "project_id = 42"),  # GitHub project numbers
+    ("git_path", "projects/my-app/src/main.rs"),  # path that starts with projects/ but not GCP
+
+    # Azure false positives
+    ("azure_word_in_text", "We host on Azure for compliance"),
+    ("uuid_in_log", "request_id: 12345678-1234-1234-1234-123456789012"),  # UUID without azure context
+    ("blob_word", "the blob storage class is great"),
 ]
 
 
