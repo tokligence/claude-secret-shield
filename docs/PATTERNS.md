@@ -21,7 +21,7 @@ These files are blocked from being read by Claude entirely:
 
 ---
 
-## Secret Patterns (164 patterns, 10 categories)
+## Secret Patterns (205 patterns, 11 categories)
 
 ### AI / ML Providers (17 patterns)
 
@@ -45,7 +45,7 @@ These files are blocked from being read by Claude entirely:
 | POSTHOG_TOKEN | `phx_` | PostHog | `phx_{40+ chars}` |
 | PINECONE_KEY | `pcsk_` | Pinecone | `pcsk_{50+ chars}` |
 
-### Cloud Providers (13 patterns)
+### Cloud Providers — Credentials (13 patterns)
 
 | Pattern | Prefix | Provider |
 |---------|--------|----------|
@@ -62,6 +62,42 @@ These files are blocked from being read by Claude entirely:
 | TENCENT_SECRET_ID | `AKID` | Tencent Cloud |
 | GCP_SA_PRIVATE_KEY_ID | JSON context | GCP |
 | IBM_CLOUD_KEY | context-based | IBM Cloud |
+
+### Cloud Providers — Resource IDs (22 patterns)
+
+These are not credentials per se, but they leak organization structure
+(account IDs), naming conventions, and resource topology — all useful for
+attacker reconnaissance.
+
+| Pattern | Anchor | Provider |
+|---------|--------|----------|
+| AWS_SECRETSMANAGER_ARN | `arn:aws:secretsmanager:...:secret:...` | AWS Secrets Manager |
+| AWS_RDS_ARN | `arn:aws:rds:...:cluster\|db\|snapshot:...` | AWS RDS |
+| AWS_KMS_ARN | `arn:aws:kms:...:key\|alias/...` | AWS KMS |
+| AWS_IAM_ARN | `arn:aws:iam::...:role\|user\|policy/...` | AWS IAM |
+| AWS_S3_ARN | `arn:aws:s3:::bucket-name/...` | AWS S3 |
+| AWS_LAMBDA_ARN | `arn:aws:lambda:...:function:...` | AWS Lambda |
+| AWS_ECS_ARN | `arn:aws:ecs:...:task-definition\|cluster\|service/...` | AWS ECS |
+| AWS_GENERIC_ARN | `arn:aws:...:<12-digit-account>:...` | AWS (catchall) |
+| AWS_ACCOUNT_ID | `aws_account_id = "123456789012"` (narrow context) | AWS |
+| AWS_ECR_REGISTRY | `123456789012.dkr.ecr.region.amazonaws.com` | AWS ECR |
+| AWS_RDS_ENDPOINT | `cluster-id.cluster-xxx.region.rds.amazonaws.com` | AWS RDS |
+| GCP_SECRET_NAME | `projects/proj-id/secrets/name/versions/v` | GCP Secret Manager |
+| GCP_KMS_KEY | `projects/.../locations/.../keyRings/.../cryptoKeys/...` | GCP KMS |
+| GCP_SA_EMAIL | `name@project.iam.gserviceaccount.com` | GCP IAM |
+| GCP_PROJECT_ID | `gcp_project_id = "proj"` (narrow context) | GCP |
+| AZURE_RESOURCE_ID | `/subscriptions/UUID/resourceGroups/...` | Azure |
+| AZURE_SUBSCRIPTION_ID | `subscription_id = "UUID"` (narrow context) | Azure |
+| AZURE_TENANT_ID | `tenant_id = "UUID"` (narrow context) | Azure AD |
+| AZURE_KEYVAULT_URI | `https://vault.vault.azure.net/...` | Azure Key Vault |
+| AZURE_STORAGE_URL | `https://account.blob.core.windows.net/...` | Azure Storage |
+
+**Why narrow context for `AWS_ACCOUNT_ID`, `GCP_PROJECT_ID`, `AZURE_SUBSCRIPTION_ID`?**
+These would otherwise generate too many false positives. Generic terms like
+`account_id` and `project_id` are extremely common in non-cloud codebases
+(JIRA, GitLab, GitHub Projects, internal databases). The patterns require
+provider-specific labels (`aws_account_id`, `gcp_project_id`, etc.) before
+matching.
 
 ### DevOps / CI-CD / Package Registries (36 patterns)
 
