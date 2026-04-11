@@ -276,6 +276,14 @@ def build_redacted_prompt(prompt):
             matched_value = m.group(0)
             if len(matched_value) < 8:
                 continue
+                # Skip false positives: bare camelCase variable names in GENERIC_SECRET
+                # e.g. 'password: newPassword,' — newPassword is code, not a real secret
+                if pattern_name == 'GENERIC_SECRET':
+                    _parts = matched_value.split('=', 1) if '=' in matched_value else matched_value.split(':', 1)
+                    if len(_parts) == 2:
+                        _val = _parts[1].strip().strip('"\'').rstrip(',;) \\n')
+                        if re.match(r'^[a-z][a-zA-Z]{2,}$', _val):
+                            continue
             preview = matched_value[:6] + "..." + matched_value[-4:] if len(matched_value) > 14 else matched_value[:4] + "..."
             counters[pattern_name] = counters.get(pattern_name, 0) + 1
             placeholder = "{{" + f"{pattern_name}_{counters[pattern_name]}" + "}}"
