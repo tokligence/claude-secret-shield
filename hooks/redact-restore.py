@@ -966,9 +966,83 @@ try:
                                 shutil.copy2(bak_file, file_path)
                             except OSError:
                                 pass
-                # For Write: file already has correct content (placeholders
-                # were restored in PreToolUse). Just clean up backup.
+                elif tool_name == "Write":
+                    # After Write: file was written with placeholders restored
+                    # in PreToolUse, but may still contain residual placeholders
+                    # or new secrets. Scan and fix, mirroring Edit's PostToolUse.
+                    mapping = load_mapping()
+                    if mapping.get("placeholder_to_secret"):
+                        try:
+                            with open(file_path, "r", errors="replace") as f:
+                                written = f.read()
+                            restored = restore_content(written, mapping)
+                            if restored != written:
+                                with open(file_path, "w") as f:
+                                    f.write(restored)
+                                debug_log(f"Write PostToolUse: restored placeholders in {file_path}")
+                        except OSError:
+                            # Fall back to restoring from backup
+                            try:
+                                shutil.copy2(bak_file, file_path)
+                            except OSError:
+                                pass
                 cleanup_backup(file_path)
+
+        # ── Bash PostToolUse: fix files that may have been written with ──────
+        # ── redacted placeholders by a Bash read-modify-write script.      ──
+        #
+        # Bug scenario: a Bash command (e.g. python3 script) reads a file
+        # while it is temporarily redacted on disk, then writes the content
+        # back — baking the {{PLACEHOLDER}} into the real file.
+        #
+        # Strategy: extract file paths mentioned in the command, then scan
+        # each writable file for placeholder patterns and restore them.
+        # Also scan any files with pending backup metadata.
+        if tool_name == "Bash":
+            command = tool_input.get("command", "")
+            mapping = load_mapping()
+            if mapping.get("placeholder_to_secret"):
+                # Collect candidate file paths from the command string.
+                # Heuristic: extract quoted and unquoted absolute/relative paths.
+                candidate_paths = set()
+                # Absolute paths
+                for m in re.finditer(r'''['"](\/[^\s'"]+)['"]''', command):
+                    candidate_paths.add(m.group(1))
+                for m in re.finditer(r'(?<!\w)(\/[^\s;|&<>"\']+)', command):
+                    candidate_paths.add(m.group(1))
+                # Also check paths from pending backup metadata
+                if os.path.isdir(BACKUP_DIR):
+                    for entry in os.listdir(BACKUP_DIR):
+                        if entry.endswith(".meta"):
+                            meta_path = os.path.join(BACKUP_DIR, entry)
+                            try:
+                                with open(meta_path) as mf:
+                                    meta = json.load(mf)
+                                p = meta.get("original_path", "")
+                                if p:
+                                    candidate_paths.add(p)
+                            except (json.JSONDecodeError, OSError, KeyError):
+                                pass
+
+                # Check each candidate file for placeholder contamination
+                placeholder_re = re.compile(r'\{\{[A-Z_]+_[a-f0-9]{8}x*\}\}')
+                for path in candidate_paths:
+                    if not os.path.isfile(path):
+                        continue
+                    if is_binary_file(path):
+                        continue
+                    try:
+                        with open(path, "r", errors="replace") as f:
+                            current = f.read()
+                        if not placeholder_re.search(current):
+                            continue
+                        restored = restore_content(current, mapping)
+                        if restored != current:
+                            with open(path, "w") as f:
+                                f.write(restored)
+                            debug_log(f"Bash PostToolUse: restored placeholders in {path}")
+                    except (OSError, PermissionError):
+                        pass
 
         # Auto-delete prompt artifacts after restore is complete
         if _delete_tmp_secrets_file:
