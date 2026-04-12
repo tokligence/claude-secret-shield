@@ -738,18 +738,27 @@ CREATE INDEX idx_turns_user_session ON redmem.turns(user_id, session_id, line_nu
 CREATE INDEX idx_turns_project ON redmem.turns(project_dir, created_at);
 
 -- Row-Level Security for multi-tenant
--- Row-Level Security: map DB role -> user_id via a lookup table.
--- This avoids requiring user_id = DB role name (emails vs role names differ).
+-- Row-Level Security: SECURITY DEFINER function for safe role->user_id lookup.
+-- user_roles table is owned by redmem_admin; users cannot read/write it directly.
+-- The lookup function runs with admin privileges but only returns the caller's user_id.
+
 CREATE TABLE redmem.user_roles (
     db_role   TEXT PRIMARY KEY,  -- PostgreSQL role name (e.g. redmem_tony)
     user_id   TEXT NOT NULL      -- application identity (e.g. tony@company.com)
 );
+ALTER TABLE redmem.user_roles OWNER TO redmem_admin;
+REVOKE ALL ON redmem.user_roles FROM PUBLIC;
+
+-- Safe lookup: runs as admin, returns only the calling user's identity
+CREATE OR REPLACE FUNCTION redmem.my_user_id()
+RETURNS TEXT LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path = redmem
+AS $$ SELECT user_id FROM redmem.user_roles WHERE db_role = current_user $$;
+ALTER FUNCTION redmem.my_user_id() OWNER TO redmem_admin;
 
 ALTER TABLE redmem.turns ENABLE ROW LEVEL SECURITY;
 CREATE POLICY user_own_data ON redmem.turns
-    FOR ALL USING (user_id = (
-        SELECT user_id FROM redmem.user_roles WHERE db_role = current_user
-    ));
+    FOR ALL USING (user_id = redmem.my_user_id());
 CREATE POLICY admin_all ON redmem.turns
     FOR SELECT TO redmem_admin USING (true);
 
@@ -918,6 +927,16 @@ nomic-embed-text (768d, 274MB), bge-small-en-v1.5 (384d, 130MB).
 ```
 
 ---
+
+## Other TODO
+
+- [ ] README.md: rewrite for redmem (currently still claude-secret-shield README)
+- [ ] install.sh: adapt for redmem_dispatcher.py + memory hooks (PreCompact, SessionStart, PostToolUse Task)
+- [ ] CLI tool: `redmem search/stats/gc/timeline/export/check` implementation
+- [ ] Migration path: detect old claude-secret-shield settings.json, auto-upgrade to redmem_dispatcher.py
+- [ ] uninstall.sh: update for new hook references
+- [ ] test_hook.py: extend with memory ingest/search/resume tests
+- [ ] pyproject.toml: package metadata for PyPI publication
 
 ## Open Questions
 
