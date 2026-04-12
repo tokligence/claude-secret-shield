@@ -96,8 +96,11 @@ def handle_session_start(data: dict):
                 # Fallback: extract first non-heading line from context
                 for line in context.splitlines():
                     line = line.strip()
-                    if line and not line.startswith("#") and not line.startswith("<!--") and not line.startswith("["):
-                        goal_query = line[:200]
+                    if line and not line.startswith("#") and not line.startswith("<!--"):
+                        import re as _re
+                        line = _re.sub(r'^\[L\d+\]\s*\w+:\s*', '', line)
+                        if line:
+                            goal_query = line[:200]
                         break
             knowledge = search_knowledge(cwd, goal_query, current_session_id=session_id) if goal_query else ""
             if knowledge:
