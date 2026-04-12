@@ -281,7 +281,7 @@ def memory_generate_session_state(data):
     # From recent turns (keyword extraction, lower signal)
     recent = db.execute("""
         SELECT content FROM turns
-        WHERE session_id = ? ORDER BY turn_index DESC LIMIT 80
+        WHERE session_id = ? ORDER BY line_number DESC LIMIT 80
     """, (session_id,)).fetchall()
 
     for (content,) in recent:
@@ -378,7 +378,7 @@ def memory_search_archive(data):
 
     safe_query = sanitize_fts5_query(prompt)
     results = db.execute("""
-        SELECT t.turn_index, t.role, t.content, t.files_touched, rank
+        SELECT t.line_number, t.role, t.content, t.files_touched, rank
         FROM turns_fts f JOIN turns t ON t.id = f.rowid
         WHERE turns_fts MATCH ? AND t.session_id = ?
         ORDER BY rank LIMIT 5
@@ -407,10 +407,10 @@ Key findings from real session analysis (36,850 lines, 37 compacts):
 |-------|-------|
 | Compact boundary | `type=system, subtype=compact_boundary, compactMetadata={trigger, preTokens}` |
 | Summary entry | `type=user, isCompactSummary=true` (immediately after boundary) |
-| Turn ordering | No `turn_index` field. UUID + parentUuid chain. Line number = natural order. |
+| Turn ordering | No `line_number` field. UUID + parentUuid chain. Line number = natural order. |
 | Deletion | **None.** All original turns preserved. Compact only appends markers. |
 
-**Implication for ingest:** Track last archived line number (not turn_index).
+**Implication for ingest:** Track last archived line number (not line_number).
 Skip `compact_boundary` and `isCompactSummary` entries. Append everything else.
 
 ## Ingest: Archiving Turns
@@ -425,7 +425,7 @@ def memory_archive_turns(data):
     if not transcript_path:
         return
 
-    backend = get_archive_backend()  # SQLite or PostgreSQL
+    backend = get_archive_backend(session_id)  # SQLite or PostgreSQL
 
     max_line = backend.get_max_line_number(session_id)
 
@@ -615,7 +615,7 @@ from typing import List, Optional
 @dataclass
 class Turn:
     session_id: str
-    line_number: int      # JSONL line number (natural order, no turn_index)
+    line_number: int      # JSONL line number (natural order, no line_number)
     uuid: str             # Claude Code UUID
     role: str
     content: str
@@ -738,11 +738,14 @@ CREATE INDEX idx_turns_user_session ON redmem.turns(user_id, session_id, line_nu
 CREATE INDEX idx_turns_project ON redmem.turns(project_dir, created_at);
 
 -- Row-Level Security for multi-tenant
+-- NOTE: RLS uses the authenticated DB role, NOT client-controlled GUCs.
+-- Each user connects with their own DB role (e.g. redmem_tony).
+-- Admin role (redmem_admin) granted explicit read-all.
 ALTER TABLE redmem.turns ENABLE ROW LEVEL SECURITY;
 CREATE POLICY user_own_data ON redmem.turns
-    FOR ALL USING (user_id = current_setting('redmem.current_user'));
+    FOR ALL USING (user_id = current_user);       -- DB-authenticated role
 CREATE POLICY admin_all ON redmem.turns
-    FOR SELECT USING (current_setting('redmem.is_admin', true) = 'true');
+    FOR SELECT TO redmem_admin USING (true);       -- explicit admin role
 
 -- Same pattern for milestones, sessions, state_events tables
 ```
