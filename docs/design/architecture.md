@@ -415,7 +415,11 @@ def memory_archive_turns(data):
     if not new_turns:
         return
 
-    # Content is pre-redacted -- Claude never saw real secrets
+    # Content is pre-redacted -- Claude never saw real secrets.
+    # Secondary defense: sanitize each turn to catch secrets that leaked
+    # through Bash/curl tool results (bypassing the Read redaction path).
+    new_turns = [sanitize_turn(t) for t in new_turns]
+
     db.executemany("""
         INSERT OR IGNORE INTO turns
         (session_id, turn_index, role, content, content_hash,
@@ -505,7 +509,7 @@ def sanitize_for_archive(content: str) -> str:
     ],
     "PostToolUse": [
       {
-        "matcher": "Read|Write|Edit",
+        "matcher": "Read|Write|Edit|Bash",
         "hooks": [{
           "type": "command",
           "command": "python3 ~/.claude/hooks/redmem_dispatcher.py",
