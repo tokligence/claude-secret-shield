@@ -162,5 +162,146 @@ class TestResume:
         assert "migration" in context.lower() or "schema" in context.lower()
 
 
+
+
+class TestSessionState:
+    def test_track_task_created(self):
+        from hooks.memory.session_state import track_state_event, get_events_path
+        import hooks.memory.db as archive_db
+
+        session_id = "test-state-track"
+        track_state_event(session_id, "TaskCreate", {
+            "tasks": [{"description": "Fix deposit currency", "status": "in_progress"}]
+        })
+
+        # Verify in SQLite
+        conn = archive_db.get_db(session_id)
+        events = conn.execute(
+            "SELECT event_type, title FROM state_events WHERE session_id = ?",
+            (session_id,)
+        ).fetchall()
+        conn.close()
+        assert len(events) >= 1
+        assert events[0][0] == "task_created"
+        assert "deposit" in events[0][1].lower()
+
+    def test_track_task_completed(self):
+        from hooks.memory.session_state import track_state_event
+        import hooks.memory.db as archive_db
+
+        session_id = "test-state-complete"
+        track_state_event(session_id, "TaskUpdate", {
+            "id": "task-1",
+            "status": "completed",
+            "description": "Migration 076 applied"
+        })
+
+        conn = archive_db.get_db(session_id)
+        events = conn.execute(
+            "SELECT event_type, title FROM state_events WHERE session_id = ?",
+            (session_id,)
+        ).fetchall()
+        conn.close()
+        assert any(e[0] == "task_completed" for e in events)
+
+    def test_track_plan_updated(self):
+        from hooks.memory.session_state import track_state_event
+        import hooks.memory.db as archive_db
+
+        session_id = "test-state-plan"
+        track_state_event(session_id, "EnterPlanMode", {
+            "plan": "Multi-currency architecture Phase 2"
+        })
+
+        conn = archive_db.get_db(session_id)
+        events = conn.execute(
+            "SELECT event_type, title FROM state_events WHERE session_id = ?",
+            (session_id,)
+        ).fetchall()
+        conn.close()
+        assert any(e[0] == "plan_updated" for e in events)
+
+    def test_generate_state_empty(self):
+        from hooks.memory.session_state import generate_session_state, get_state_path
+        session_id = "test-state-gen-empty"
+        generate_session_state(session_id)
+        state_path = get_state_path(session_id)
+        assert os.path.isfile(state_path)
+        with open(state_path) as f:
+            content = f.read()
+        assert "Session State" in content
+
+    def test_generate_state_with_events(self):
+        from hooks.memory.session_state import (
+            track_state_event, generate_session_state, get_state_path
+        )
+        import hooks.memory.db as archive_db
+
+        session_id = "test-state-gen-full"
+
+        # Add some events
+        track_state_event(session_id, "TaskCreate", {
+            "tasks": [{"description": "Implement FTS5 search", "status": "in_progress"}]
+        })
+        track_state_event(session_id, "TaskUpdate", {
+            "id": "t1", "status": "completed", "description": "Implement FTS5 search"
+        })
+
+        # Add a turn with blocker keyword
+        conn = archive_db.get_db(session_id)
+        conn.execute("""
+            INSERT INTO turns (session_id, line_number, uuid, role, content, content_hash, token_estimate)
+            VALUES (?, 1, 'u1', 'assistant', 'This is blocked by secret-shield hook intercepting writes', 'h1', 10)
+        """, (session_id,))
+        conn.commit()
+        conn.close()
+
+        generate_session_state(session_id)
+
+        state_path = get_state_path(session_id)
+        with open(state_path) as f:
+            content = f.read()
+
+        assert "Done" in content
+        assert "FTS5" in content or "search" in content.lower()
+
+    def test_generate_state_preserves_goal(self):
+        from hooks.memory.session_state import generate_session_state, get_state_path
+        import hooks.memory.db as archive_db
+
+        session_id = "test-state-goal"
+        state_path = get_state_path(session_id)
+
+        # Write initial state with a goal
+        os.makedirs(os.path.dirname(state_path), mode=0o700, exist_ok=True)
+        with open(state_path, "w") as f:
+            f.write("# Session State\n\n## Goal\nBuild multi-currency wallet\n")
+
+        # Ensure DB exists
+        conn = archive_db.get_db(session_id)
+        conn.close()
+
+        generate_session_state(session_id)
+
+        with open(state_path) as f:
+            content = f.read()
+        assert "multi-currency" in content.lower()
+
+    def test_events_jsonl_written(self):
+        from hooks.memory.session_state import track_state_event, get_events_path
+
+        session_id = "test-state-jsonl"
+        track_state_event(session_id, "TaskCreate", {
+            "tasks": [{"description": "Write tests", "status": "in_progress"}]
+        })
+
+        events_path = get_events_path(session_id)
+        assert os.path.isfile(events_path)
+        with open(events_path) as f:
+            lines = f.readlines()
+        assert len(lines) >= 1
+        event = json.loads(lines[-1])
+        assert event["type"] == "task_created"
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

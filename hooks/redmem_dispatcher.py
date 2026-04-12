@@ -55,6 +55,9 @@ def handle_pre_compact(data: dict):
         count = archive_turns(session_id, cwd)
         if count > 0:
             sys.stderr.write(f"[redmem] Archived {count} turns\n")
+        # Generate session_state.md (Phase 1.5)
+        from memory.session_state import generate_session_state
+        generate_session_state(session_id, cwd)
     except Exception as e:
         sys.stderr.write(f"[redmem] Archive error: {e}\n")
 
@@ -110,8 +113,17 @@ def handle_user_prompt_memory(data: dict, shield_result: dict) -> dict:
 
 def handle_task_event(data: dict):
     """Track task/plan changes for session state (Phase 1.5)."""
-    # TODO: implement state_events tracking
-    pass
+    session_id = data.get("session_id", "")
+    tool_name = data.get("tool_name", "")
+    tool_input = data.get("tool_input", {})
+    tool_result = data.get("tool_result", {})
+    if not session_id:
+        return
+    try:
+        from memory.session_state import track_state_event
+        track_state_event(session_id, tool_name, tool_input, tool_result)
+    except Exception as e:
+        sys.stderr.write(f"[redmem] Task tracking error: {e}\n")
 
 
 def main():
