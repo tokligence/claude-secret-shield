@@ -982,13 +982,22 @@ try:
                             except OSError:
                                 pass
                 elif tool_name == "Write":
-                    # After Write: file was written with placeholders restored
-                    # in PreToolUse, but may still contain residual placeholders.
-                    # Scan and fix.
-                    # NOTE: Do NOT fall back to backup restore on error -- for
-                    # Write operations there is no valid backup (PreToolUse no
-                    # longer creates one). Falling back to an old backup would
-                    # silently discard the new file content.
+                    # Write completed successfully. Mark backup as freshness-only
+                    # so crash recovery won't restore it (the old file content
+                    # is now irrelevant — the Write overwrote it).
+                    bak_meta = backup_path_for(file_path) + ".meta"
+                    if os.path.exists(bak_meta):
+                        try:
+                            with open(bak_meta) as f:
+                                meta = json.load(f)
+                            meta["write_freshness_only"] = True
+                            with open(bak_meta, "w") as f:
+                                json.dump(meta, f)
+                        except (OSError, json.JSONDecodeError):
+                            pass
+                    # Scan for residual placeholders in the written file.
+                    # Do NOT fall back to backup restore on error — the backup
+                    # is the OLD file, not the new write.
                     mapping = load_mapping()
                     if mapping.get("placeholder_to_secret"):
                         try:
@@ -1156,21 +1165,11 @@ try:
         # only used as a redaction marker; cleanup_backup deletes it.
         if file_path and os.path.isfile(file_path):
             backup_and_redact_file(file_path, mapping)
-            # Mark this backup as freshness-only so crash recovery
-            # (restore_pending_backups) skips it. Without this flag,
-            # a crash between Write and PostToolUse cleanup would
-            # restore the OLD file content, silently discarding the write.
-            bp = backup_path_for(file_path)
-            meta_path = bp + ".meta"
-            if os.path.exists(meta_path):
-                try:
-                    with open(meta_path) as f:
-                        meta = json.load(f)
-                    meta["write_freshness_only"] = True
-                    with open(meta_path, "w") as f:
-                        json.dump(meta, f)
-                except (OSError, json.JSONDecodeError):
-                    pass
+            # NOTE: Do NOT mark the backup as freshness-only here.
+            # If Claude Code crashes before Write completes, crash
+            # recovery must restore the original file (with real secrets).
+            # The write_freshness_only flag is set in PostToolUse AFTER
+            # Write succeeds, so crash recovery only skips completed writes.
 
         # Restore placeholders in the content being written
         restored = restore_content(write_content, mapping)
