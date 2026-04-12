@@ -29,7 +29,7 @@ def track_state_event(session_id: str, tool_name: str, tool_input: dict,
 
     # Determine event type and title from tool
     if tool_name in ("TaskCreate", "TodoWrite"):
-        tasks = tool_input.get("tasks", [])
+        tasks = tool_input.get("todos", tool_input.get("tasks", []))
         if isinstance(tasks, list):
             for task in tasks:
                 if isinstance(task, dict):
@@ -52,29 +52,30 @@ def track_state_event(session_id: str, tool_name: str, tool_input: dict,
             _write_event(session_id, ts, "task_started", description[:200])
 
     elif tool_name in ("EnterPlanMode", "ExitPlanMode"):
-        detail = tool_input.get("plan", tool_input.get("content", ""))
+        plan_text = tool_input.get("plan", tool_input.get("content", ""))
         _write_event(session_id, ts, "plan_updated",
-                     f"{tool_name}: {detail[:200]}" if detail else tool_name)
+                     tool_name, detail=plan_text[:500] if plan_text else None)
 
 
-def _write_event(session_id: str, ts: str, event_type: str, title: str):
+def _write_event(session_id: str, ts: str, event_type: str, title: str,
+                 detail: str = None):
     """Write event to JSONL file and SQLite."""
     # JSONL append (fast, crash-safe)
     events_path = get_events_path(session_id)
     os.makedirs(os.path.dirname(events_path), mode=0o700, exist_ok=True)
+    entry = {"ts": ts, "type": event_type, "title": title, "session_id": session_id}
+    if detail:
+        entry["detail"] = detail
     with open(events_path, "a") as f:
-        f.write(json.dumps({
-            "ts": ts, "type": event_type, "title": title,
-            "session_id": session_id
-        }, ensure_ascii=False) + "\n")
+        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
     # SQLite (structured query)
     try:
         conn = archive_db.get_db(session_id)
         conn.execute("""
-            INSERT INTO state_events (session_id, event_type, title)
-            VALUES (?, ?, ?)
-        """, (session_id, event_type, title))
+            INSERT INTO state_events (session_id, event_type, title, detail)
+            VALUES (?, ?, ?, ?)
+        """, (session_id, event_type, title, detail))
         conn.commit()
         conn.close()
     except Exception:
@@ -118,8 +119,11 @@ def generate_session_state(session_id: str, cwd: str = ""):
 
     # From events (high signal)
     for etype, title, detail in events:
-        if etype == "task_completed" and title not in sections["done"]:
-            sections["done"].append(f"- {title}")
+        if etype == "task_completed":
+            entry = f"- {title}"
+            # Normalize: check both raw title and bulleted form to avoid duplicates
+            if entry not in sections["done"] and title not in str(sections["done"]):
+                sections["done"].append(entry)
         elif etype == "task_created" and title not in str(sections["plan"]):
             sections["plan"].append(title)
         elif etype == "plan_updated" and detail:
