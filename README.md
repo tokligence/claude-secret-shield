@@ -175,4 +175,4 @@ python3 test_hook.py && python3 -m pytest test_memory.py -v
 
 ## License
 
-MIT
+Apache 2.0
