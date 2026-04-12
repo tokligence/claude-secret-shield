@@ -140,8 +140,8 @@ row-level security, SECURITY DEFINER role mapping, and enterprise deployment.
 | **1. MVP Memory** | Done | Ingest, search, summarize, PreCompact/SessionStart hooks |
 | **1.5 Session State** | Done | session_state.md, task/plan tracking via PostToolUse |
 | **2. Smart Recall** | Done | Auto-search archive on recall keywords in UserPromptSubmit |
-| **3. Semantic Search** | On Hold | sqlite-vec + embedding model for fuzzy recall. Requires external deps (~200MB fastembed or ~2GB torch). FTS5 keyword search is sufficient for most code conversations. Will implement as optional: `pip install redmem[semantic]` |
-| **4. Cross-Session Knowledge** | Planned | Project-level `knowledge.db` indexing session summaries + key entities across all sessions. Enables "who solved this before?" and new-session onboarding from prior sessions. Needs sufficient session data to be valuable. |
+| **3. Cross-Session Knowledge** | Done | Project-level `knowledge.db` indexing session summaries + key entities across all sessions. Enables "who solved this before?" and new-session onboarding from prior sessions. |
+| **4. Semantic Search** | On Hold | sqlite-vec + embedding model for fuzzy recall. Requires external deps (~200MB fastembed or ~2GB torch). FTS5 keyword search is sufficient for most code conversations. Will implement as optional: `pip install redmem[semantic]` |
 
 ### Other TODO
 

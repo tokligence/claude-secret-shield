@@ -873,8 +873,8 @@ redmem/
 | **1. MVP Memory** | ingest + search + summarize + PreCompact/SessionStart hooks | Turns archived, context restored on resume |
 | **1.5 Session State** | session_state.md + PostToolUse task tracking + heuristic | Structured orientation on resume |
 | **2. Smart Recall** | UserPromptSubmit auto-search on recall keywords | Auto-retrieves from archive mid-conversation |
-| **3. Semantic Search** | sqlite-vec embeddings + FTS5/vector hybrid (RRF) | Fuzzy recall without exact keywords |
-| **4. Cross-Session** | Project-level knowledge index across sessions | Cross-session queries |
+| **3. Cross-Session** | Project-level knowledge index across sessions | Cross-session queries |
+| **4. Semantic Search** | On Hold. sqlite-vec embeddings + FTS5/vector hybrid (RRF) | Fuzzy recall without exact keywords. Optional: `pip install redmem[semantic]` |
 
 ### Phase 0: Migration from claude-secret-shield
 
@@ -896,7 +896,7 @@ mkdir -p hooks/shield hooks/memory
 
 ---
 
-## Phase 3: Semantic Search (sqlite-vec)
+## Phase 4: Semantic Search (sqlite-vec) — On Hold
 
 ```sql
 CREATE VIRTUAL TABLE turns_vec USING vec0(
@@ -916,7 +916,7 @@ nomic-embed-text (768d, 274MB), bge-small-en-v1.5 (384d, 130MB).
 
 ---
 
-## Phase 4: Cross-Session Knowledge
+## Phase 3: Cross-Session Knowledge (Done)
 
 ```
 ~/.claude/vault/
