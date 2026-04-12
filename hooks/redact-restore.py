@@ -1141,13 +1141,14 @@ try:
         file_path = tool_input.get("file_path", "")
         write_content = tool_input.get("content", "")
 
-        # NOTE: Do NOT backup_and_redact_file for Write operations.
-        # Write replaces the entire file -- freshness check is irrelevant
-        # (that is an Edit concern). Backing up + redacting the old file
-        # caused silent data loss: if PostToolUse fell back to the backup
-        # on any error, it restored the OLD file content, discarding the
-        # new write entirely. This was the root cause of "Write tool
-        # silently fails on files with redacted patterns."
+        # Re-redact the existing file so Claude Code's freshness check
+        # passes (disk must match what Claude read earlier — placeholders).
+        # NOTE: backup_and_redact_file creates a backup, but PostToolUse
+        # must NEVER fall back to restoring from it — that would silently
+        # discard the new Write content (the original bug). The backup is
+        # only used as a redaction marker; cleanup_backup deletes it.
+        if file_path and os.path.isfile(file_path):
+            backup_and_redact_file(file_path, mapping)
 
         # Restore placeholders in the content being written
         restored = restore_content(write_content, mapping)
