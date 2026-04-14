@@ -114,6 +114,34 @@ redmem check                            # verify installation health
 redmem gc --older-than 90d              # prune old archives
 ```
 
+## Archiving Running Sessions (Catchup)
+
+Hooks only fire for new sessions started after install. For **currently running
+sessions** (which can't be restarted without losing context), use `redmem_catchup.py`:
+
+```bash
+# One-time: archive all sessions modified in the last 30 days
+python3 ~/.claude/hooks/redmem_catchup.py
+
+# Target a specific session
+python3 ~/.claude/hooks/redmem_catchup.py --session <uuid>
+
+# Watch mode: incrementally archive every 60 seconds
+python3 ~/.claude/hooks/redmem_catchup.py --watch
+
+# Custom interval (default 60s)
+python3 ~/.claude/hooks/redmem_catchup.py --watch --interval 30
+```
+
+**Safety guarantees:**
+- Catchup only **reads** JSONL files, never modifies them
+- Idempotent — only ingests turns after the last archived `line_number`
+- Skips partial writes (last line without trailing `\n`) — caught on next run
+- Zero impact on running Claude Code sessions
+
+**Persistent watch (optional):** set up via launchd (macOS) or systemd (Linux).
+See [docs/watch-daemon.md](docs/watch-daemon.md) for platform-specific examples.
+
 ## Backend Configuration
 
 redmem supports pluggable backends via `~/.claude/redmem.yaml`:

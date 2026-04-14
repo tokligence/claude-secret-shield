@@ -83,7 +83,9 @@ echo "  OK: Memory module installed"
 echo "  -> Downloading dispatcher..."
 curl -fsSL "$BASE_URL/hooks/redmem_dispatcher.py" -o "$HOOKS_DIR/redmem_dispatcher.py"
 chmod +x "$HOOKS_DIR/redmem_dispatcher.py"
-echo "  OK: Dispatcher installed"
+curl -fsSL "$BASE_URL/hooks/redmem_catchup.py" -o "$HOOKS_DIR/redmem_catchup.py"
+chmod +x "$HOOKS_DIR/redmem_catchup.py"
+echo "  OK: Dispatcher + catchup installed"
 
 # ── Remove legacy files ─────────────────────────────────────────────────
 if [ -f "$HOOKS_DIR/redact-secrets.sh" ]; then
@@ -225,4 +227,20 @@ echo ""
 echo "  Re-running install.sh upgrades redmem without affecting custom patterns."
 echo ""
 echo "  Restart Claude Code for changes to take effect."
+echo ""
+
+# ── One-time catchup: archive existing sessions ─────────────────────────
+echo "  -> Archiving existing sessions (last 7 days)..."
+if python3 "$HOOKS_DIR/redmem_catchup.py" --max-age-days 7 2>&1; then
+  echo "  OK: Catchup complete"
+else
+  echo "  WARN: Catchup had errors (not fatal — run manually later)"
+fi
+
+echo ""
+echo "  Tips:"
+echo "    - For continuous archival of long-running sessions:"
+echo "        python3 ~/.claude/hooks/redmem_catchup.py --watch"
+echo "    - Or set up as a launchd/systemd daemon:"
+echo "        https://github.com/tokligence/redmem/blob/main/docs/watch-daemon.md"
 echo ""
