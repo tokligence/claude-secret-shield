@@ -230,8 +230,8 @@ echo "  Restart Claude Code for changes to take effect."
 echo ""
 
 # ── One-time catchup: archive existing sessions ─────────────────────────
-echo "  -> Archiving existing sessions (last 7 days)..."
-if python3 "$HOOKS_DIR/redmem_catchup.py" --max-age-days 7 2>&1; then
+echo "  -> Archiving existing sessions (last 60 days)..."
+if python3 "$HOOKS_DIR/redmem_catchup.py" --max-age-days 60 2>&1; then
   echo "  OK: Catchup complete"
 else
   echo "  WARN: Catchup had errors (not fatal — run manually later)"

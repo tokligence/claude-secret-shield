@@ -147,8 +147,8 @@ def run_watch(args):
 def main():
     ap = argparse.ArgumentParser(description="Archive Claude Code sessions now (no hook needed)")
     ap.add_argument("--session", help="Archive specific session ID (default: all)")
-    ap.add_argument("--max-age-days", type=int, default=30,
-                    help="Only archive sessions modified within N days (default: 30)")
+    ap.add_argument("--max-age-days", type=int, default=60,
+                    help="Only archive sessions modified within N days (default: 60)")
     ap.add_argument("--watch", action="store_true",
                     help="Continuous mode: archive every --interval seconds")
     ap.add_argument("--interval", type=int, default=60,

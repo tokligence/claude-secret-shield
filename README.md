@@ -120,7 +120,7 @@ Hooks only fire for new sessions started after install. For **currently running
 sessions** (which can't be restarted without losing context), use `redmem_catchup.py`:
 
 ```bash
-# One-time: archive all sessions modified in the last 30 days
+# One-time: archive all sessions modified in the last 60 days (default)
 python3 ~/.claude/hooks/redmem_catchup.py
 
 # Target a specific session
