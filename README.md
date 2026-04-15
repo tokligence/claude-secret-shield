@@ -44,6 +44,31 @@ redmem_dispatcher.py
 As separate plugins, hook ordering is unreliable. One dispatcher guarantees shield
 runs first (code-level if/return), memory runs second on safe data only.
 
+## Relationship with Claude Code's Native Recap
+
+As of Claude Code 2.1.108 (released 2026-04-14), Claude Code ships a **native
+`※ recap:`** feature that auto-generates a summary when resuming sessions.
+This is a server-side feature — all client versions receive it.
+
+redmem **complements** the native recap, not competes with it:
+
+| Capability | Native Recap | redmem |
+|------------|--------------|--------|
+| Summarize current session on resume | ✓ | ✓ (may overlap) |
+| Early turns discarded by compact | ✗ | ✓ — FTS5 search over vault |
+| Other sessions' related work | ✗ | ✓ — `knowledge.db` |
+| "Remember when we discussed X" auto-search | ✗ | ✓ — UserPromptSubmit hook |
+| Project-level knowledge across sessions | ✗ | ✓ |
+| Full conversation archive (lossless) | ✗ | ✓ — SQLite FTS5 |
+| Secret protection | ✗ | ✓ — shield layer |
+
+**Short version:** native recap is "inside the session"; redmem is "outside the
+session." They run in parallel without conflict — native recap displays via
+`※ recap:` prefix, redmem injects via `additionalContext`.
+
+No configuration needed. If you ever want to disable native recap:
+`/config` in Claude Code.
+
 ## Features
 
 ### Secret Protection (Layer A)
