@@ -19,6 +19,16 @@ for f in redact-restore.py patterns.py redact-secrets.sh custom-patterns.example
   fi
 done
 
+# Remove guard (if installed via --with-guard)
+if [ -d "$HOOKS_DIR/guard" ]; then
+  if [ -f "$HOOKS_DIR/guard/agent_isolation_guard.py" ]; then
+    rm "$HOOKS_DIR/guard/agent_isolation_guard.py"
+    echo "  OK: Removed $HOOKS_DIR/guard/agent_isolation_guard.py"
+  fi
+  # Remove the directory if now empty (don't force — user may have other files).
+  rmdir "$HOOKS_DIR/guard" 2>/dev/null && echo "  OK: Removed empty $HOOKS_DIR/guard" || true
+fi
+
 # Remove session mapping files
 REMOVED_MAPS=0
 for f in /tmp/.claude-redact-*.json; do
@@ -37,10 +47,13 @@ if [ -f "$SETTINGS_FILE" ] && command -v jq >/dev/null 2>&1; then
     def is_secret_shield_hook:
       any(
         (.hooks // [])[].command?;
-        . == "~/.claude/hooks/redact-secrets.sh" or . == "python3 ~/.claude/hooks/redact-restore.py"
+        . == "~/.claude/hooks/redact-secrets.sh"
+        or . == "python3 ~/.claude/hooks/redact-restore.py"
+        or . == "python3 ~/.claude/hooks/guard/agent_isolation_guard.py"
       )
       or (.command? == "~/.claude/hooks/redact-secrets.sh")
-      or (.command? == "python3 ~/.claude/hooks/redact-restore.py");
+      or (.command? == "python3 ~/.claude/hooks/redact-restore.py")
+      or (.command? == "python3 ~/.claude/hooks/guard/agent_isolation_guard.py");
     if .hooks.PreToolUse then
       .hooks.PreToolUse = [
         .hooks.PreToolUse[]

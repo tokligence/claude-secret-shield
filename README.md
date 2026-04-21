@@ -89,6 +89,31 @@ No configuration needed. If you ever want to disable native recap:
 - **Task tracking** — captures TaskCreate/TaskUpdate/Plan changes via PostToolUse hook
 - **Full-text search** — BM25 ranking with porter stemmer + unicode support
 
+### Guard (optional)
+
+An opt-in third capability that prevents the most common footgun in
+Claude Code parallel-agent workflows: the parent spawns multiple `Agent`
+tool calls that touch the same git repo without `isolation: "worktree"`,
+and the concurrent runs stomp on each other's uncommitted changes.
+
+- **What it does** — When `PreToolUse(Agent)` fires, the guard checks
+  whether another non-isolated Agent is already active in the same repo.
+  If so, it denies the new call with a message telling you to pass
+  `isolation: "worktree"` or wait. `PostToolUse(Agent)` clears the
+  tracking entry.
+- **Scope** — Ergonomics, not security. The guard fails open on any
+  internal error (corrupt state, git missing, disk full) — it will
+  never brick your workflow.
+- **Enable** — `./install.sh --with-guard` (default install is unchanged).
+- **Bypass a single call** — `touch ~/.claude/vault/.guard_bypass` before
+  triggering the Agent call. The file is deleted the first time the
+  guard would otherwise deny.
+- **Disable entirely** — remove the two `guard/agent_isolation_guard.py`
+  entries from `~/.claude/settings.json`, or re-run `./uninstall.sh`.
+
+State file: `~/.claude/vault/active_agents.json`. Stale entries (older
+than 45 minutes) are purged automatically on every invocation.
+
 ## Quick Start
 
 ```bash
@@ -214,8 +239,11 @@ python3 test_hook.py
 # Memory tests (21)
 python3 -m pytest test_memory.py -v
 
+# Guard tests (11, only needed if you use --with-guard)
+python3 test_guard.py
+
 # All tests
-python3 test_hook.py && python3 -m pytest test_memory.py -v
+python3 test_hook.py && python3 -m pytest test_memory.py -v && python3 test_guard.py
 ```
 
 ## Documentation

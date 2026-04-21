@@ -37,6 +37,26 @@ curl -fsSL https://raw.githubusercontent.com/tokligence/claude-secret-shield/mai
 - **调试模式** -- 设置 `REDACT_DEBUG=1` 进行排查
 - **346 个端���端测试** -- 全面的测试覆盖
 
+### Guard（可选，opt-in）
+
+第三个能力，默认不安装。用来防止 Claude Code **并发 Agent 工作流**中最常见的坑：
+父 agent 同时派生多个 `Agent` 工具调用，而没有传 `isolation: "worktree"`，几个
+并发任务在同一个 git repo 里互相覆盖未提交的改动。
+
+- **做什么** — `PreToolUse(Agent)` 触发时，guard 检查同一个 repo 里是否已经有另一个
+  未隔离的 Agent 在跑。有的话就 deny 当前调用，并在消息里提示：加上
+  `isolation: "worktree"` 或等前一个跑完。`PostToolUse(Agent)` 清理登记项。
+- **定位** — 这是**工效**工具，不是安全边界。内部任何异常（状态损坏、git 不可用、
+  磁盘满）都 **fail-open**，绝不卡住你的工作流。
+- **启用** — `./install.sh --with-guard`（默认安装不受影响）。
+- **一次性绕过** — `touch ~/.claude/vault/.guard_bypass`，第一次会 deny 的调用会
+  被放行，该文件随即删除。
+- **彻底关掉** — 把 `~/.claude/settings.json` 里两条 `guard/agent_isolation_guard.py`
+  删掉，或重跑 `./uninstall.sh`。
+
+状态文件：`~/.claude/vault/active_agents.json`。超过 45 分钟的陈旧登记项每次调用
+都会被自动清理。
+
 ## 工作原理
 
 四层策略协同工作，保护你的秘密凭据：

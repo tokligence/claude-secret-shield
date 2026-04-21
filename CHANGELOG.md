@@ -5,6 +5,7 @@ All notable changes to redmem will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- **Guard module** (optional, opt-in via `./install.sh --with-guard`): agent isolation guard that denies concurrent non-isolated `Agent` tool calls targeting the same git repo, preventing parallel subagents from stomping on each other's uncommitted changes. Standalone hook (not routed through the dispatcher); fail-open on any internal error. Includes `.guard_bypass` one-shot override and 11 hermetic tests (`test_guard.py`).
 - **Memory module** (Phase 0-2): persistent session archive for Claude Code
   - `hooks/memory/db.py`: SQLite FTS5 schema + connection management
   - `hooks/memory/transcript_parser.py`: Claude Code JSONL parser (verified append-only format, skips compact_boundary/isCompactSummary markers)

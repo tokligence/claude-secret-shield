@@ -1,22 +1,42 @@
 #!/bin/sh
 # redmem — One-line installer
-# Usage: curl -sL https://raw.githubusercontent.com/tokligence/redmem/main/install.sh | sh
+# Usage:
+#   curl -sL https://raw.githubusercontent.com/tokligence/redmem/main/install.sh | sh
+#   ./install.sh                 # default: shield + memory only
+#   ./install.sh --with-guard    # also install optional agent isolation guard
 #
 # What this does:
 #   1. Installs shield hooks (secret redaction) to ~/.claude/hooks/
 #   2. Installs memory module (session archive) to ~/.claude/hooks/memory/
 #   3. Installs the dispatcher (single entry point) to ~/.claude/hooks/
-#   4. Merges hook config into ~/.claude/settings.json (preserves existing settings)
-#   5. Creates vault directory for session archives
-#   6. Migrates from old claude-secret-shield if detected
+#   4. (opt-in, --with-guard) Installs agent isolation guard hook
+#   5. Merges hook config into ~/.claude/settings.json (preserves existing settings)
+#   6. Creates vault directory for session archives
+#   7. Migrates from old claude-secret-shield if detected
 
 set -e
 
+INSTALL_GUARD=false
+for arg in "$@"; do
+  case "$arg" in
+    --with-guard) INSTALL_GUARD=true ;;
+    -h|--help)
+      sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'
+      exit 0
+      ;;
+    *)
+      echo "  WARN: unknown argument: $arg"
+      ;;
+  esac
+done
+
 HOOKS_DIR="$HOME/.claude/hooks"
 MEMORY_DIR="$HOOKS_DIR/memory"
+GUARD_DIR="$HOOKS_DIR/guard"
 VAULT_DIR="$HOME/.claude/vault/sessions"
 SETTINGS_FILE="$HOME/.claude/settings.json"
 BASE_URL="https://raw.githubusercontent.com/tokligence/redmem/main"
+SCRIPT_DIR=$(cd "$(dirname "$0")" 2>/dev/null && pwd || echo "")
 
 echo ""
 echo "  redmem (redact + memory)"
@@ -87,6 +107,20 @@ curl -fsSL "$BASE_URL/hooks/redmem_catchup.py" -o "$HOOKS_DIR/redmem_catchup.py"
 chmod +x "$HOOKS_DIR/redmem_catchup.py"
 echo "  OK: Dispatcher + catchup installed"
 
+# ── Guard (optional, opt-in via --with-guard) ───────────────────────────
+if [ "$INSTALL_GUARD" = true ]; then
+  echo "  -> Installing guard (agent isolation)..."
+  mkdir -p "$GUARD_DIR"
+  if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/hooks/guard/agent_isolation_guard.py" ]; then
+    cp "$SCRIPT_DIR/hooks/guard/agent_isolation_guard.py" "$GUARD_DIR/agent_isolation_guard.py"
+  else
+    curl -fsSL "$BASE_URL/hooks/guard/agent_isolation_guard.py" -o "$GUARD_DIR/agent_isolation_guard.py"
+  fi
+  chmod +x "$GUARD_DIR/agent_isolation_guard.py"
+  mkdir -p "$HOME/.claude/vault"
+  echo "  OK: Guard installed"
+fi
+
 # ── Remove legacy files ─────────────────────────────────────────────────
 if [ -f "$HOOKS_DIR/redact-secrets.sh" ]; then
   rm "$HOOKS_DIR/redact-secrets.sh"
@@ -151,6 +185,26 @@ fi
 
 echo "$UPDATED" | jq '.' > "$SETTINGS_FILE"
 echo "  OK: Updated $SETTINGS_FILE"
+
+# ── Guard hook entries in settings.json (opt-in) ────────────────────────
+if [ "$INSTALL_GUARD" = true ]; then
+  GUARD_PRE='{"matcher":"Agent","hooks":[{"type":"command","command":"python3 ~/.claude/hooks/guard/agent_isolation_guard.py","timeout":5}]}'
+  GUARD_POST='{"matcher":"Agent","hooks":[{"type":"command","command":"python3 ~/.claude/hooks/guard/agent_isolation_guard.py","timeout":5}]}'
+
+  GUARD_UPDATED=$(cat "$SETTINGS_FILE" | jq \
+    --argjson guard_pre "$GUARD_PRE" \
+    --argjson guard_post "$GUARD_POST" '
+    # Strip any existing guard entries so re-running install is idempotent.
+    def strip_guard:
+      map(select(
+        (.hooks[0].command // "") != "python3 ~/.claude/hooks/guard/agent_isolation_guard.py"
+      ));
+      .hooks.PreToolUse  = ((.hooks.PreToolUse  // []) | strip_guard) + [$guard_pre]
+    | .hooks.PostToolUse = ((.hooks.PostToolUse // []) | strip_guard) + [$guard_post]
+  ')
+  echo "$GUARD_UPDATED" | jq '.' > "$SETTINGS_FILE"
+  echo "  OK: Guard hook entries merged into $SETTINGS_FILE"
+fi
 
 # ── CLAUDE.md guidance ──────────────────────────────────────────────────
 CLAUDE_MD="$HOME/.claude/CLAUDE.md"
@@ -228,6 +282,14 @@ echo "  Re-running install.sh upgrades redmem without affecting custom patterns.
 echo ""
 echo "  Restart Claude Code for changes to take effect."
 echo ""
+
+if [ "$INSTALL_GUARD" = true ]; then
+  echo "  -> Guard installed. To bypass a single Agent call:"
+  echo "       touch ~/.claude/vault/.guard_bypass"
+  echo "     To disable entirely: remove the two hook entries in ~/.claude/settings.json"
+  echo "     matching 'guard/agent_isolation_guard.py'."
+  echo ""
+fi
 
 # ── One-time catchup: archive existing sessions ─────────────────────────
 echo "  -> Archiving existing sessions (last 60 days)..."

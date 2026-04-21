@@ -70,6 +70,24 @@ Archives full conversation before compaction, restores context on resume:
 | UserPromptSubmit | Auto-search archive on recall-intent keywords |
 | PostToolUse(Task/Plan) | Track task/plan changes to state_events.jsonl |
 
+### Layer C: Guard (optional, opt-in)
+
+Standalone hook (NOT routed through `redmem_dispatcher.py`) that prevents
+concurrent `Agent` tool calls from stomping on the same git repo when the
+parent forgets to pass `isolation: "worktree"`.
+
+| Hook Event | Action |
+|-----------|--------|
+| PreToolUse(Agent) | Deny if another non-isolated Agent is active in same repo root; record entry otherwise |
+| PostToolUse(Agent) | Remove matching entry from `~/.claude/vault/active_agents.json` |
+
+Fingerprint = 16-char sha256 of canonical `tool_input` JSON. Repo root =
+`git rev-parse --show-toplevel` (falls back to `cwd` for non-git dirs).
+Stale entries (>45min) are purged on every call. All errors fail **open**
+— this is an ergonomics layer, not a security boundary. Bypass one call
+via `touch ~/.claude/vault/.guard_bypass`. Installed only via
+`./install.sh --with-guard`.
+
 ---
 
 ## Single Dispatcher Architecture
