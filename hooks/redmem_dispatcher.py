@@ -5,6 +5,7 @@ redmem dispatcher — single entry point for all Claude Code hook events.
 Routes to:
 - shield (redact-restore.py) for secret protection
 - memory module for session archival/search/resume
+- autopilot module for overnight /autopilot loops
 """
 import json
 import os
@@ -26,6 +27,9 @@ RECALL_RE = re.compile(
     r"(before|earlier|remember|recall|之前|上次|记得|还记得|migration\s+\d+)",
     re.IGNORECASE,
 )
+
+# Autopilot init marker (embedded by the /autopilot slash-command template)
+AUTOPILOT_INIT_RE = re.compile(r"<!--\s*autopilot-init:")
 
 
 def run_shield(input_json: str) -> dict:
@@ -158,6 +162,48 @@ def handle_user_prompt_memory(data: dict, shield_result: dict) -> dict:
     return shield_result
 
 
+def handle_autopilot_init(data: dict) -> str:
+    """If the user-submitted prompt carries an autopilot-init marker,
+    run preflight check and create/refresh the autopilot state. Returns a
+    user-visible message to append to UserPromptSubmit's additionalContext
+    (empty string if nothing to say). Fail-open on any error."""
+    prompt = data.get("prompt", "") or ""
+    if not AUTOPILOT_INIT_RE.search(prompt):
+        return ""
+    try:
+        from autopilot.autopilot import handle_init
+        msg = handle_init(data)
+        return msg or ""
+    except Exception as e:
+        sys.stderr.write(f"[redmem] autopilot init error: {e}\n")
+        return ""
+
+
+def handle_pretooluse_bash_guard(data: dict) -> dict | None:
+    """Autopilot-mode bash guard: deny destructive commands when autopilot
+    is active for the session. Returns a deny response dict or None."""
+    if data.get("tool_name") != "Bash":
+        return None
+    try:
+        from autopilot.autopilot import check_bash_command
+        return check_bash_command(data)
+    except Exception as e:
+        sys.stderr.write(f"[redmem] bash guard error: {e}\n")
+        return None
+
+
+def handle_stop(data: dict):
+    """Emit Stop hook decision for autopilot (or allow stop)."""
+    try:
+        from autopilot.autopilot import handle_stop_hook
+        resp = handle_stop_hook(data)
+    except Exception as e:
+        sys.stderr.write(f"[redmem] autopilot stop-hook error: {e}\n")
+        return
+    if resp:
+        print(json.dumps(resp))
+
+
 def handle_task_event(data: dict):
     """Track task/plan changes for session state (Phase 1.5)."""
     session_id = data.get("session_id", "")
@@ -194,17 +240,56 @@ def main():
             handle_session_start(data)
         sys.exit(0)
 
-    # ── UserPromptSubmit: shield first, then memory search ──
+    # ── UserPromptSubmit: shield first, then memory search, then autopilot init ──
     if event == "UserPromptSubmit":
         shield_result = run_shield(raw_input)
 
-        # If shield blocked, don't run memory search
+        # If shield blocked, don't run memory search / autopilot init
         blocked = shield_result.get("hookSpecificOutput", {}).get("permissionDecision") == "deny"
         if shield_result.get("decision") == "block":
             blocked = True
 
         if not blocked:
             shield_result = handle_user_prompt_memory(data, shield_result)
+            init_msg = handle_autopilot_init(data)
+            if init_msg:
+                # Append the autopilot init message (armed/refused/warned) to
+                # additionalContext so Claude and the user see it.
+                shield_result.setdefault("hookSpecificOutput", {})
+                shield_result["hookSpecificOutput"]["hookEventName"] = "UserPromptSubmit"
+                existing_ctx = shield_result["hookSpecificOutput"].get("additionalContext", "")
+                shield_result["hookSpecificOutput"]["additionalContext"] = (
+                    (existing_ctx + "\n\n" + init_msg) if existing_ctx else init_msg
+                )
+
+        if shield_result:
+            print(json.dumps(shield_result))
+        sys.exit(0)
+
+    # ── Stop: autopilot may inject continuation and keep the loop going ──
+    if event == "Stop":
+        handle_stop(data)
+        sys.exit(0)
+
+    # ── PreToolUse: shield secret-restore, then autopilot bash guard ──
+    if event == "PreToolUse":
+        shield_result = run_shield(raw_input)
+
+        # If shield denied (e.g. blocked-file read), emit and stop here.
+        shield_denied = (
+            shield_result.get("hookSpecificOutput", {}).get("permissionDecision") == "deny"
+            or shield_result.get("decision") == "block"
+        )
+        if shield_denied:
+            if shield_result:
+                print(json.dumps(shield_result))
+            sys.exit(0)
+
+        # Autopilot bash guard (only fires if session has active autopilot state).
+        guard_resp = handle_pretooluse_bash_guard(data)
+        if guard_resp:
+            print(json.dumps(guard_resp))
+            sys.exit(0)
 
         if shield_result:
             print(json.dumps(shield_result))
@@ -222,7 +307,7 @@ def main():
             print(json.dumps(shield_result))
         sys.exit(0)
 
-    # ── All other events (PreToolUse, SessionEnd): pass to shield ──
+    # ── All other events (SessionEnd, etc.): pass to shield ──
     shield_result = run_shield(raw_input)
     if shield_result:
         print(json.dumps(shield_result))

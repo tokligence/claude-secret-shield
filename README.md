@@ -79,6 +79,8 @@ No configuration needed. If you ever want to disable native recap:
 - Deterministic `{{NAME_hash}}` placeholders (HMAC-based, stable across sessions)
 - Auto-restore on write/edit — Claude writes placeholders, disk gets real values
 - User prompt scanning — blocks messages containing raw secrets
+- Housekeeping files (`.tmp_secrets.*`) auto-registered in `.git/info/exclude`
+  on first create — never leak into `git status` or `.gitignore`
 
 ### Session Memory (Layer B)
 
@@ -113,6 +115,83 @@ and the concurrent runs stomp on each other's uncommitted changes.
 
 State file: `~/.claude/vault/active_agents.json`. Stale entries (older
 than 45 minutes) are purged automatically on every invocation.
+
+### Autopilot (overnight spec-driven loop)
+
+Let Claude work unattended on a spec while you sleep, with multiple safety
+layers. Three slash commands:
+
+```
+/autopilot [max_loop=150] <full-spec-path>   # start (runs preflight check)
+/autopilot-stop                              # disengage explicitly
+/autopilot-status                            # show progress
+```
+
+#### Recommended overnight recipe
+
+```bash
+# 1. Isolate: create a worktree so a misfire can't touch your main tree
+git worktree add ../$(basename $PWD)-autopilot-$(date +%s) -b autopilot/<name>
+cd ../*-autopilot-*
+
+# 2. Launch Claude here, skip permission prompts so it doesn't wait for you
+claude --dangerously-skip-permissions
+
+# 3. In the session, start the loop with your spec
+/autopilot 200 /absolute/path/to/spec.md
+# ...go to sleep. Come back, review the branch, merge or discard.
+```
+
+#### Safety stack
+
+1. **Git worktree isolation (strongly recommended)** — blast radius
+   contained to one directory. `git worktree remove --force` is a clean
+   rollback.
+2. **Preflight health check** — `/autopilot` refuses to arm on protected
+   branches (`main`, `master`, `trunk`, `develop`, `dev`) or on a dirty
+   working tree. Warns if you're not in a worktree.
+3. **Destructive-command guard** — while autopilot is active, a
+   `PreToolUse(Bash)` hook denies: `rm -rf`, `find -exec rm`,
+   `git reset --hard`, `git checkout -f`, `git clean -fdx`,
+   `git branch -D`, `git push --force`, `DROP TABLE`, `TRUNCATE`. Claude
+   is told why and picks a safer alternative. **Only active in autopilot
+   mode** — normal sessions are unaffected.
+4. **Loop-level halt conditions** — `max_loop` reached (default 150),
+   5 consecutive turns with no repo change (stuck detector), or 10h wall
+   clock.
+5. **Graceful human takeover** — just type anything. The `Stop` hook
+   sees the absence of the continuation marker on the last user message
+   and disengages automatically; no command needed.
+6. **Fail-open** — any hook error allows stop, so a plugin bug can never
+   trap a session in an unstoppable loop.
+
+#### What you'll find in the morning
+
+All artifacts live under `.autopilot/` inside the worktree. redmem
+auto-registers `/.autopilot/` into `.git/info/exclude` at
+`/autopilot` init time — so nothing in this directory ever pollutes
+`git status`, PRs, or your team's shared `.gitignore`.
+
+| File | Meaning |
+|------|---------|
+| `.autopilot/TASKS.md` | Claude's live checklist; unchecked = left over. |
+| `.autopilot/QUESTIONS.md` | Decisions Claude deferred to you (it was told not to ask). |
+| `.autopilot/IMPROVE.md` | Claude's suggestions for the spec itself. |
+| `.autopilot/DONE.md` | Claude emitted `[[AUTOPILOT_DONE]]` — it thinks it's finished. |
+| `.autopilot/HALTED.md` | A halt condition tripped (max_loop / stuck / wall-clock). |
+| `.autopilot/README.md` | Auto-generated guide to this directory. |
+
+Safe to `rm -rf .autopilot/` any time — nothing is shared.
+
+State file (separate, plugin-internal): `~/.claude/vault/autopilot/<session_id>.json`
+— progress, iter count, last fingerprint, branch, worktree flag.
+
+#### Pairing with `--dangerously-skip-permissions`
+
+The bash guard is what makes skip-permission actually safe for overnight
+use. Without the guard, one ambiguous spec turn could `rm -rf` your work.
+With the guard, the most dangerous 10% of commands are denied by policy
+and Claude is redirected to reversible alternatives.
 
 ## Quick Start
 

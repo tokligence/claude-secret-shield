@@ -27,6 +27,7 @@ Exit codes:
   Non-zero without JSON = error (Claude Code shows stderr)
 """
 
+import subprocess
 import sys
 import json
 import os
@@ -345,6 +346,62 @@ def cleanup_prompt_artifacts_for_session(state_key):
     delete_session_state(state_key)
 
 
+# ── Tmp-secrets exclude registration (moved above handlers so it's in
+# scope when UserPromptSubmit fires) ───────────────────────────────────
+TMP_SECRETS_EXCLUDES = [
+    "/.tmp_secrets.conf",
+    "/.tmp_secrets.prompt.txt",
+    "/.tmp_secrets.*.conf",
+    "/.tmp_secrets.*.prompt.txt",
+]
+
+
+def _find_repo_root(start_dir):
+    d = os.path.abspath(start_dir) if start_dir else None
+    while d and d != os.path.dirname(d):
+        marker = os.path.join(d, ".git")
+        if os.path.isdir(marker) or os.path.isfile(marker):
+            return d
+        d = os.path.dirname(d)
+    return None
+
+
+def _ensure_git_exclude(repo_root, entries):
+    """Idempotently append `entries` to git's local exclude list
+    (<repo>/.git/info/exclude, or the worktree's equivalent). Uses
+    `git rev-parse --git-path info/exclude` so it handles linked
+    worktrees correctly. Fails silently — housekeeping only."""
+    if not repo_root:
+        return
+    try:
+        r = subprocess.run(
+            ["git", "-C", repo_root, "rev-parse", "--git-path", "info/exclude"],
+            capture_output=True, text=True, timeout=3,
+        )
+        exclude_path = r.stdout.strip() if r.returncode == 0 else ""
+        if not exclude_path:
+            return
+        if not os.path.isabs(exclude_path):
+            exclude_path = os.path.join(repo_root, exclude_path)
+        os.makedirs(os.path.dirname(exclude_path), exist_ok=True)
+        existing = set()
+        if os.path.isfile(exclude_path):
+            with open(exclude_path, "r", encoding="utf-8") as f:
+                existing = set(f.read().splitlines())
+        to_add = [e for e in entries if e not in existing]
+        if not to_add:
+            return
+        with open(exclude_path, "a", encoding="utf-8") as f:
+            if existing:
+                f.write("\n")
+            f.write("# Added by redmem (shield)\n")
+            for e in to_add:
+                f.write(e + "\n")
+        debug_log(f"Added tmp-secret patterns to {exclude_path}")
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
+        debug_log(f"git-exclude register skipped: {e.__class__.__name__}")
+
+
 try:
     # ══════════════════════════════════════════════════════════════════════════
     # UserPromptSubmit: Scan user prompt for secrets before sending to API
@@ -422,6 +479,11 @@ try:
                         tf.write(redacted_prompt)
                     os.chmod(tmp_file, 0o600)
                     os.chmod(tmp_context_file, 0o600)
+                    # Register patterns in .git/info/exclude proactively on
+                    # FIRST create (not just on Read), so these files never
+                    # show up in `git status` even if Claude never reads them.
+                    _ensure_git_exclude(_find_repo_root(prompt_dir),
+                                        TMP_SECRETS_EXCLUDES)
                     previous_state = load_session_state(state_key)
                     new_state = {
                         "nonce": nonce,
@@ -864,53 +926,21 @@ try:
 
 
 
-    # ── Auto-gitignore .tmp_secrets.conf ────────────────────────────────────
+    # (TMP_SECRETS_EXCLUDES / _find_repo_root / _ensure_git_exclude now
+    # defined at module level above — single source of truth for the
+    # UserPromptSubmit create-time call AND the Read-time fall-through.)
     def ensure_gitignore(file_path):
-        """If file_path is a temporary prompt file, ensure both are gitignored."""
-        basename = os.path.basename(file_path)
+        """Kept for backward compatibility. Registers tmp-secret exclusion
+        in .git/info/exclude (local-only), NOT in .gitignore."""
+        basename = os.path.basename(file_path) if file_path else ""
         if not (
             basename in (".tmp_secrets.conf", ".tmp_secrets.prompt.txt")
             or re.match(r"\.tmp_secrets\.[a-f0-9]{12}\.conf$", basename)
             or re.match(r"\.tmp_secrets\.[a-f0-9]{12}\.prompt\.txt$", basename)
         ):
             return
-        # Find the repo root (nearest .git directory)
-        d = os.path.dirname(os.path.abspath(file_path))
-        gitignore_path = None
-        while d != os.path.dirname(d):
-            if os.path.isdir(os.path.join(d, ".git")):
-                gitignore_path = os.path.join(d, ".gitignore")
-                break
-            d = os.path.dirname(d)
-        if not gitignore_path:
-            return
-        entries = [
-            "# Auto-added by claude-secret-shield",
-            ".tmp_secrets.conf",
-            ".tmp_secrets.prompt.txt",
-            ".tmp_secrets.*.conf",
-            ".tmp_secrets.*.prompt.txt",
-        ]
-        if os.path.exists(gitignore_path):
-            try:
-                with open(gitignore_path, "r") as f:
-                    contents = f.read()
-                    if (
-                        ".tmp_secrets.conf" in contents
-                        and ".tmp_secrets.prompt.txt" in contents
-                        and ".tmp_secrets.*.conf" in contents
-                        and ".tmp_secrets.*.prompt.txt" in contents
-                    ):
-                        return
-            except OSError:
-                return
-        # Append to .gitignore
-        try:
-            with open(gitignore_path, "a") as f:
-                f.write("\n" + "\n".join(entries) + "\n")
-            debug_log(f"Added prompt temp files to {gitignore_path}")
-        except OSError:
-            pass
+        _ensure_git_exclude(_find_repo_root(os.path.dirname(os.path.abspath(file_path))),
+                            TMP_SECRETS_EXCLUDES)
 
 
     # ── Strategy 1: Check block list ─────────────────────────────────────────

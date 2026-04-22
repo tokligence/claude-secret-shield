@@ -33,6 +33,9 @@ done
 HOOKS_DIR="$HOME/.claude/hooks"
 MEMORY_DIR="$HOOKS_DIR/memory"
 GUARD_DIR="$HOOKS_DIR/guard"
+AUTOPILOT_DIR="$HOOKS_DIR/autopilot"
+COMMANDS_DIR="$HOME/.claude/commands"
+AUTOPILOT_STATE_DIR="$HOME/.claude/vault/autopilot"
 VAULT_DIR="$HOME/.claude/vault/sessions"
 SETTINGS_FILE="$HOME/.claude/settings.json"
 BASE_URL="https://raw.githubusercontent.com/tokligence/redmem/main"
@@ -68,44 +71,67 @@ fi
 # ── Create directories ──────────────────────────────────────────────────
 mkdir -p "$HOOKS_DIR"
 mkdir -p "$MEMORY_DIR"
+mkdir -p "$AUTOPILOT_DIR"
+mkdir -p "$AUTOPILOT_STATE_DIR"
+mkdir -p "$COMMANDS_DIR"
 mkdir -p "$VAULT_DIR"
 chmod 700 "$VAULT_DIR"
+chmod 700 "$AUTOPILOT_STATE_DIR"
 
-# ── Download shield files ───────────────────────────────────────────────
-echo "  -> Downloading shield (secret protection)..."
-curl -fsSL "$BASE_URL/hooks/redact-restore.py" -o "$HOOKS_DIR/redact-restore.py"
+# Helper: install a file, preferring local SCRIPT_DIR copy over curl.
+# Lets `./install.sh` from a checked-out repo install the current WIP
+# instead of last-pushed code.
+install_file() {
+  SRC_REL="$1"       # e.g. "hooks/redact-restore.py"
+  DEST_ABS="$2"      # e.g. "$HOOKS_DIR/redact-restore.py"
+  if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/$SRC_REL" ]; then
+    cp "$SCRIPT_DIR/$SRC_REL" "$DEST_ABS"
+  else
+    curl -fsSL "$BASE_URL/$SRC_REL" -o "$DEST_ABS"
+  fi
+}
+
+# ── Install shield files ────────────────────────────────────────────────
+echo "  -> Installing shield (secret protection)..."
+install_file "hooks/redact-restore.py"       "$HOOKS_DIR/redact-restore.py"
 chmod +x "$HOOKS_DIR/redact-restore.py"
-
-curl -fsSL "$BASE_URL/hooks/patterns.py" -o "$HOOKS_DIR/patterns.py"
-
-curl -fsSL "$BASE_URL/hooks/custom-patterns.example.py" -o "$HOOKS_DIR/custom-patterns.example.py"
-
-curl -fsSL "$BASE_URL/hooks/mask-output.py" -o "$HOOKS_DIR/mask-output.py"
-
-curl -fsSL "$BASE_URL/hooks/statusline.sh" -o "$HOOKS_DIR/statusline.sh"
+install_file "hooks/patterns.py"             "$HOOKS_DIR/patterns.py"
+install_file "hooks/custom-patterns.example.py" "$HOOKS_DIR/custom-patterns.example.py"
+install_file "hooks/mask-output.py"          "$HOOKS_DIR/mask-output.py"
+install_file "hooks/statusline.sh"           "$HOOKS_DIR/statusline.sh"
 chmod +x "$HOOKS_DIR/statusline.sh"
 
 # Preserve user custom patterns
 if [ -f "$HOOKS_DIR/custom-patterns.py" ]; then
   echo "  OK: Existing custom-patterns.py preserved"
 fi
-
 echo "  OK: Shield installed"
 
-# ── Download memory module ──────────────────────────────────────────────
-echo "  -> Downloading memory (session archive)..."
+# ── Install memory module ───────────────────────────────────────────────
+echo "  -> Installing memory (session archive)..."
 for FILE in __init__.py db.py transcript_parser.py ingest.py search.py summarize.py session_state.py knowledge.py; do
-  curl -fsSL "$BASE_URL/hooks/memory/$FILE" -o "$MEMORY_DIR/$FILE"
+  install_file "hooks/memory/$FILE" "$MEMORY_DIR/$FILE"
 done
 echo "  OK: Memory module installed"
 
-# ── Download dispatcher ─────────────────────────────────────────────────
-echo "  -> Downloading dispatcher..."
-curl -fsSL "$BASE_URL/hooks/redmem_dispatcher.py" -o "$HOOKS_DIR/redmem_dispatcher.py"
+# ── Install dispatcher ──────────────────────────────────────────────────
+echo "  -> Installing dispatcher..."
+install_file "hooks/redmem_dispatcher.py" "$HOOKS_DIR/redmem_dispatcher.py"
 chmod +x "$HOOKS_DIR/redmem_dispatcher.py"
-curl -fsSL "$BASE_URL/hooks/redmem_catchup.py" -o "$HOOKS_DIR/redmem_catchup.py"
+install_file "hooks/redmem_catchup.py"    "$HOOKS_DIR/redmem_catchup.py"
 chmod +x "$HOOKS_DIR/redmem_catchup.py"
 echo "  OK: Dispatcher + catchup installed"
+
+# ── Autopilot module + slash commands ───────────────────────────────────
+echo "  -> Installing autopilot module..."
+install_file "hooks/autopilot/__init__.py" "$AUTOPILOT_DIR/__init__.py"
+install_file "hooks/autopilot/autopilot.py" "$AUTOPILOT_DIR/autopilot.py"
+chmod +x "$AUTOPILOT_DIR/autopilot.py"
+
+for CMD in autopilot.md autopilot-stop.md autopilot-status.md; do
+  install_file "commands/$CMD" "$COMMANDS_DIR/$CMD"
+done
+echo "  OK: Autopilot + slash commands installed"
 
 # ── Guard (optional, opt-in via --with-guard) ───────────────────────────
 if [ "$INSTALL_GUARD" = true ]; then
@@ -130,16 +156,20 @@ fi
 # ── Configure settings.json ─────────────────────────────────────────────
 echo "  -> Configuring Claude Code settings..."
 
-# Shield hooks (direct, for Read/Write/Edit/Bash — latency-critical)
-SHIELD_PRE='{"matcher":"Read|Write|Edit|Bash","hooks":[{"type":"command","command":"python3 ~/.claude/hooks/redact-restore.py","timeout":5}]}'
+# Shield hooks (direct, for Read/Write/Edit/Bash on POST — latency-critical)
+# Note: PreToolUse now runs through the dispatcher so the autopilot bash
+# guard can intercept destructive commands in autopilot mode. Shield is
+# still called (internally) as the first step inside the dispatcher.
 SHIELD_POST='{"matcher":"Read|Write|Edit|Bash","hooks":[{"type":"command","command":"python3 ~/.claude/hooks/redact-restore.py","timeout":5}]}'
 SHIELD_SESSION_END='{"hooks":[{"type":"command","command":"python3 ~/.claude/hooks/redact-restore.py","timeout":5}]}'
 
-# Dispatcher hooks (shield + memory combined)
+# Dispatcher hooks (shield + memory + autopilot combined)
+DISPATCH_PRE='{"matcher":"Read|Write|Edit|Bash","hooks":[{"type":"command","command":"python3 ~/.claude/hooks/redmem_dispatcher.py","timeout":10}]}'
 DISPATCH_PROMPT='{"hooks":[{"type":"command","command":"python3 ~/.claude/hooks/redmem_dispatcher.py","timeout":5}]}'
 DISPATCH_COMPACT='{"hooks":[{"type":"command","command":"python3 ~/.claude/hooks/redmem_dispatcher.py","timeout":30,"statusMessage":"Archiving session..."}]}'
 DISPATCH_RESUME='{"matcher":"resume","hooks":[{"type":"command","command":"python3 ~/.claude/hooks/redmem_dispatcher.py","timeout":10,"statusMessage":"Loading session memory..."}]}'
 DISPATCH_TASK='{"matcher":"TodoWrite|TodoRead|EnterPlanMode|ExitPlanMode|TaskCreate|TaskUpdate","hooks":[{"type":"command","command":"python3 ~/.claude/hooks/redmem_dispatcher.py","timeout":5}]}'
+DISPATCH_STOP='{"hooks":[{"type":"command","command":"python3 ~/.claude/hooks/redmem_dispatcher.py","timeout":15}]}'
 
 if [ -f "$SETTINGS_FILE" ]; then
   EXISTING=$(cat "$SETTINGS_FILE")
@@ -152,7 +182,7 @@ fi
 # Build the complete hooks config
 # Strategy: remove all old redact-restore.py and redmem_dispatcher.py entries, then add fresh
 if [ "$HAS_HOOKS" = "true" ]; then
-  UPDATED=$(echo "$EXISTING" | jq     --argjson shield_pre "$SHIELD_PRE"     --argjson shield_post "$SHIELD_POST"     --argjson shield_end "$SHIELD_SESSION_END"     --argjson dispatch_prompt "$DISPATCH_PROMPT"     --argjson dispatch_compact "$DISPATCH_COMPACT"     --argjson dispatch_resume "$DISPATCH_RESUME"     --argjson dispatch_task "$DISPATCH_TASK" '
+  UPDATED=$(echo "$EXISTING" | jq     --argjson dispatch_pre "$DISPATCH_PRE"     --argjson shield_post "$SHIELD_POST"     --argjson shield_end "$SHIELD_SESSION_END"     --argjson dispatch_prompt "$DISPATCH_PROMPT"     --argjson dispatch_compact "$DISPATCH_COMPACT"     --argjson dispatch_resume "$DISPATCH_RESUME"     --argjson dispatch_task "$DISPATCH_TASK"     --argjson dispatch_stop "$DISPATCH_STOP" '
     # Clean old entries
     def remove_old:
       map(select(
@@ -161,23 +191,25 @@ if [ "$HAS_HOOKS" = "true" ]; then
         (.hooks[0].command != "~/.claude/hooks/redact-secrets.sh")
       ));
 
-    .hooks.PreToolUse = ((.hooks.PreToolUse // []) | remove_old) + [$shield_pre]
+    .hooks.PreToolUse = ((.hooks.PreToolUse // []) | remove_old) + [$dispatch_pre]
     | .hooks.PostToolUse = ((.hooks.PostToolUse // []) | remove_old) + [$shield_post, $dispatch_task]
     | .hooks.SessionEnd = [$shield_end]
     | .hooks.UserPromptSubmit = ((.hooks.UserPromptSubmit // []) | remove_old) + [$dispatch_prompt]
     | .hooks.PreCompact = ((.hooks.PreCompact // []) | remove_old) + [$dispatch_compact]
     | .hooks.SessionStart = ((.hooks.SessionStart // []) | remove_old) + [$dispatch_resume]
+    | .hooks.Stop = ((.hooks.Stop // []) | remove_old) + [$dispatch_stop]
     | .statusLine = {"type": "command", "command": "~/.claude/hooks/statusline.sh"}
   ')
 else
-  UPDATED=$(echo "$EXISTING" | jq     --argjson shield_pre "$SHIELD_PRE"     --argjson shield_post "$SHIELD_POST"     --argjson shield_end "$SHIELD_SESSION_END"     --argjson dispatch_prompt "$DISPATCH_PROMPT"     --argjson dispatch_compact "$DISPATCH_COMPACT"     --argjson dispatch_resume "$DISPATCH_RESUME"     --argjson dispatch_task "$DISPATCH_TASK" '
+  UPDATED=$(echo "$EXISTING" | jq     --argjson dispatch_pre "$DISPATCH_PRE"     --argjson shield_post "$SHIELD_POST"     --argjson shield_end "$SHIELD_SESSION_END"     --argjson dispatch_prompt "$DISPATCH_PROMPT"     --argjson dispatch_compact "$DISPATCH_COMPACT"     --argjson dispatch_resume "$DISPATCH_RESUME"     --argjson dispatch_task "$DISPATCH_TASK"     --argjson dispatch_stop "$DISPATCH_STOP" '
     .hooks = {
-      PreToolUse: [$shield_pre],
+      PreToolUse: [$dispatch_pre],
       PostToolUse: [$shield_post, $dispatch_task],
       SessionEnd: [$shield_end],
       UserPromptSubmit: [$dispatch_prompt],
       PreCompact: [$dispatch_compact],
-      SessionStart: [$dispatch_resume]
+      SessionStart: [$dispatch_resume],
+      Stop: [$dispatch_stop]
     }
     | .statusLine = {"type": "command", "command": "~/.claude/hooks/statusline.sh"}
   ')
