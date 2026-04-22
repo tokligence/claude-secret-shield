@@ -119,6 +119,26 @@ to a cached, compressed copy (longest side ≤ 1920px, format preserved).
 vision tokens per Read. Over an autopilot-style overnight run, that's
 tens of thousands of tokens.
 
+**When Claude needs pixel-level detail** — fully automatic, no renaming:
+
+```
+  1. Claude reads a big screenshot → sees the 1920px version.
+  2. redmem appends a PostToolUse note telling Claude:
+       "This image was downscaled 4032×3024 → 1920×1440.
+        If you need fine detail, run `redmem-original /path/to/img.png`."
+  3. Claude, if it can't make out small text, issues:
+       Bash(redmem-original /path/to/img.png)
+  4. A PreToolUse(Bash) hook intercepts that sentinel command, sets a
+     session-scoped flag, and *denies* — no shell command actually runs.
+  5. Claude re-issues `Read /path/to/img.png`. The hook sees the flag
+     (one-shot, then cleared) and passes the uncompressed original
+     through. Claude sees full resolution.
+```
+
+The sentinel `redmem-original` is **not a real program** on disk — it's
+a signalling channel between Claude and the hook. You don't need to
+install anything, and you don't need to rename files by hand.
+
 ### Guard (optional)
 
 An opt-in third capability that prevents the most common footgun in

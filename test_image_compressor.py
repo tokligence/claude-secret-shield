@@ -28,7 +28,10 @@ from image_compressor import (  # noqa: E402
     get_image_dims,
     is_image_path,
     maybe_compress_read,
+    maybe_handle_bash_original_request,
+    maybe_notify_post_read,
     opt_out_active,
+    request_original,
 )
 import image_compressor as ic  # noqa: E402
 
@@ -241,6 +244,141 @@ def test_sips_integration_real_compress(real_large_png):
     out2 = compress_to_cache(str(real_large_png))
     assert out2 == out
     assert os.path.getmtime(out2) == mt1
+
+
+# ── request-original flow ─────────────────────────────────────────────
+
+
+def test_bash_intercept_sets_flag_and_denies():
+    """`redmem-original /x.png` → deny + flag file written, no shell run."""
+    resp = maybe_handle_bash_original_request({
+        "session_id": "sx",
+        "tool_name": "Bash",
+        "tool_input": {"command": "redmem-original /tmp/foo.png"},
+    })
+    assert resp is not None
+    hso = resp["hookSpecificOutput"]
+    assert hso["permissionDecision"] == "deny"
+    assert "Flag set" in hso["permissionDecisionReason"]
+
+
+def test_bash_intercept_strips_quotes():
+    resp = maybe_handle_bash_original_request({
+        "session_id": "sx",
+        "tool_name": "Bash",
+        "tool_input": {"command": "redmem-original '/tmp/my image.png'"},
+    })
+    assert resp is not None
+
+
+def test_bash_intercept_ignores_other_commands():
+    for cmd in ["ls", "echo redmem-original foo", "rm file", ""]:
+        assert maybe_handle_bash_original_request({
+            "session_id": "sx",
+            "tool_name": "Bash",
+            "tool_input": {"command": cmd},
+        }) is None
+
+
+def test_flag_then_read_passes_through(big_fake_image, monkeypatch):
+    """After flag is set, next Read should pass the original through."""
+    request_original("sess1", str(big_fake_image))
+    monkeypatch.setattr(ic, "get_image_dims", lambda p: (4032, 3024))
+    # Should NOT call compress_to_cache even though dims exceed threshold.
+    monkeypatch.setattr(ic, "compress_to_cache",
+                        lambda *a, **k: pytest.fail("compress must not fire"))
+    resp = maybe_compress_read({
+        "session_id": "sess1",
+        "tool_name": "Read",
+        "tool_input": {"file_path": str(big_fake_image)},
+    })
+    assert resp is None
+
+
+def test_flag_is_one_shot(big_fake_image, tmp_path, monkeypatch):
+    """After serving the original once, the flag is cleared."""
+    request_original("sess2", str(big_fake_image))
+    monkeypatch.setattr(ic, "get_image_dims", lambda p: (4032, 3024))
+    calls = {"n": 0}
+    def fake_compress(*a, **k):
+        calls["n"] += 1
+        out = tmp_path / "c.png"
+        out.write_bytes(b"x")
+        return str(out)
+    monkeypatch.setattr(ic, "compress_to_cache", fake_compress)
+
+    # First call: flag present → pass through, no compress
+    assert maybe_compress_read({
+        "session_id": "sess2", "tool_name": "Read",
+        "tool_input": {"file_path": str(big_fake_image)},
+    }) is None
+    assert calls["n"] == 0
+
+    # Second call: flag consumed → normal compression resumes
+    resp = maybe_compress_read({
+        "session_id": "sess2", "tool_name": "Read",
+        "tool_input": {"file_path": str(big_fake_image)},
+    })
+    assert resp is not None
+    assert calls["n"] == 1
+
+
+def test_flag_scoped_by_session(big_fake_image, tmp_path, monkeypatch):
+    """A flag set for session A must not affect a Read in session B."""
+    request_original("sessA", str(big_fake_image))
+    monkeypatch.setattr(ic, "get_image_dims", lambda p: (4032, 3024))
+    out = tmp_path / "c.png"
+    out.write_bytes(b"x")
+    monkeypatch.setattr(ic, "compress_to_cache", lambda *a, **k: str(out))
+    # Session B should still get compression (flag was for A).
+    resp = maybe_compress_read({
+        "session_id": "sessB", "tool_name": "Read",
+        "tool_input": {"file_path": str(big_fake_image)},
+    })
+    assert resp is not None
+
+
+def test_post_read_notice_with_sidecar(tmp_path, isolated_cache):
+    """A Read of a cache path with a sidecar emits an additionalContext."""
+    cache = isolated_cache
+    cache.mkdir(parents=True, exist_ok=True)
+    compressed = cache / "abc-123.png"
+    compressed.write_bytes(b"x")
+    meta = cache / "abc-123.png.meta.json"
+    meta.write_text(json.dumps({
+        "original_path": "/Users/me/big.png",
+        "original_dims": [4032, 3024],
+        "compressed_dims": [1920, 1440],
+    }))
+    resp = maybe_notify_post_read({
+        "tool_name": "Read",
+        "tool_input": {"file_path": str(compressed)},
+    })
+    assert resp is not None
+    ctx = resp["hookSpecificOutput"]["additionalContext"]
+    assert "4032×3024" in ctx and "1920×1440" in ctx
+    assert "/Users/me/big.png" in ctx
+    assert "redmem-original" in ctx
+
+
+def test_post_read_no_notice_for_non_cache_path():
+    """Regular Read (not our cache) produces no notice."""
+    assert maybe_notify_post_read({
+        "tool_name": "Read",
+        "tool_input": {"file_path": "/Users/me/regular.png"},
+    }) is None
+
+
+def test_post_read_no_notice_without_sidecar(tmp_path, isolated_cache):
+    """If the sidecar is missing, stay silent (unknown provenance)."""
+    cache = isolated_cache
+    cache.mkdir(parents=True, exist_ok=True)
+    fake = cache / "abc-999.png"
+    fake.write_bytes(b"x")
+    assert maybe_notify_post_read({
+        "tool_name": "Read",
+        "tool_input": {"file_path": str(fake)},
+    }) is None
 
 
 # ── Standalone CLI smoke ──────────────────────────────────────────────

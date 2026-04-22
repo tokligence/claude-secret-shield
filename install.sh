@@ -158,19 +158,19 @@ fi
 # ── Configure settings.json ─────────────────────────────────────────────
 echo "  -> Configuring Claude Code settings..."
 
-# Shield hooks (direct, for Read/Write/Edit/Bash on POST — latency-critical)
-# Note: PreToolUse now runs through the dispatcher so the autopilot bash
-# guard can intercept destructive commands in autopilot mode. Shield is
-# still called (internally) as the first step inside the dispatcher.
-SHIELD_POST='{"matcher":"Read|Write|Edit|Bash","hooks":[{"type":"command","command":"python3 ~/.claude/hooks/redact-restore.py","timeout":5}]}'
+# SessionEnd still calls shield directly — it's a simple cleanup pass
+# and doesn't need the dispatcher's multi-module routing.
 SHIELD_SESSION_END='{"hooks":[{"type":"command","command":"python3 ~/.claude/hooks/redact-restore.py","timeout":5}]}'
 
-# Dispatcher hooks (shield + memory + autopilot combined)
+# Dispatcher hooks. The dispatcher is the single gateway for PreToolUse,
+# PostToolUse, UserPromptSubmit, Stop, PreCompact, and SessionStart —
+# it internally routes to shield / memory / autopilot / image compressor.
+# One matcher per event keeps settings.json clean.
 DISPATCH_PRE='{"matcher":"Read|Write|Edit|Bash","hooks":[{"type":"command","command":"python3 ~/.claude/hooks/redmem_dispatcher.py","timeout":10}]}'
+DISPATCH_POST='{"matcher":"Read|Write|Edit|Bash|TodoWrite|TodoRead|EnterPlanMode|ExitPlanMode|TaskCreate|TaskUpdate","hooks":[{"type":"command","command":"python3 ~/.claude/hooks/redmem_dispatcher.py","timeout":10}]}'
 DISPATCH_PROMPT='{"hooks":[{"type":"command","command":"python3 ~/.claude/hooks/redmem_dispatcher.py","timeout":5}]}'
 DISPATCH_COMPACT='{"hooks":[{"type":"command","command":"python3 ~/.claude/hooks/redmem_dispatcher.py","timeout":30,"statusMessage":"Archiving session..."}]}'
 DISPATCH_RESUME='{"matcher":"resume","hooks":[{"type":"command","command":"python3 ~/.claude/hooks/redmem_dispatcher.py","timeout":10,"statusMessage":"Loading session memory..."}]}'
-DISPATCH_TASK='{"matcher":"TodoWrite|TodoRead|EnterPlanMode|ExitPlanMode|TaskCreate|TaskUpdate","hooks":[{"type":"command","command":"python3 ~/.claude/hooks/redmem_dispatcher.py","timeout":5}]}'
 DISPATCH_STOP='{"hooks":[{"type":"command","command":"python3 ~/.claude/hooks/redmem_dispatcher.py","timeout":15}]}'
 
 if [ -f "$SETTINGS_FILE" ]; then
@@ -184,7 +184,7 @@ fi
 # Build the complete hooks config
 # Strategy: remove all old redact-restore.py and redmem_dispatcher.py entries, then add fresh
 if [ "$HAS_HOOKS" = "true" ]; then
-  UPDATED=$(echo "$EXISTING" | jq     --argjson dispatch_pre "$DISPATCH_PRE"     --argjson shield_post "$SHIELD_POST"     --argjson shield_end "$SHIELD_SESSION_END"     --argjson dispatch_prompt "$DISPATCH_PROMPT"     --argjson dispatch_compact "$DISPATCH_COMPACT"     --argjson dispatch_resume "$DISPATCH_RESUME"     --argjson dispatch_task "$DISPATCH_TASK"     --argjson dispatch_stop "$DISPATCH_STOP" '
+  UPDATED=$(echo "$EXISTING" | jq     --argjson dispatch_pre "$DISPATCH_PRE"     --argjson dispatch_post "$DISPATCH_POST"     --argjson shield_end "$SHIELD_SESSION_END"     --argjson dispatch_prompt "$DISPATCH_PROMPT"     --argjson dispatch_compact "$DISPATCH_COMPACT"     --argjson dispatch_resume "$DISPATCH_RESUME"     --argjson dispatch_stop "$DISPATCH_STOP" '
     # Clean old entries
     def remove_old:
       map(select(
@@ -194,7 +194,7 @@ if [ "$HAS_HOOKS" = "true" ]; then
       ));
 
     .hooks.PreToolUse = ((.hooks.PreToolUse // []) | remove_old) + [$dispatch_pre]
-    | .hooks.PostToolUse = ((.hooks.PostToolUse // []) | remove_old) + [$shield_post, $dispatch_task]
+    | .hooks.PostToolUse = ((.hooks.PostToolUse // []) | remove_old) + [$dispatch_post]
     | .hooks.SessionEnd = [$shield_end]
     | .hooks.UserPromptSubmit = ((.hooks.UserPromptSubmit // []) | remove_old) + [$dispatch_prompt]
     | .hooks.PreCompact = ((.hooks.PreCompact // []) | remove_old) + [$dispatch_compact]
@@ -203,10 +203,10 @@ if [ "$HAS_HOOKS" = "true" ]; then
     | .statusLine = {"type": "command", "command": "~/.claude/hooks/statusline.sh"}
   ')
 else
-  UPDATED=$(echo "$EXISTING" | jq     --argjson dispatch_pre "$DISPATCH_PRE"     --argjson shield_post "$SHIELD_POST"     --argjson shield_end "$SHIELD_SESSION_END"     --argjson dispatch_prompt "$DISPATCH_PROMPT"     --argjson dispatch_compact "$DISPATCH_COMPACT"     --argjson dispatch_resume "$DISPATCH_RESUME"     --argjson dispatch_task "$DISPATCH_TASK"     --argjson dispatch_stop "$DISPATCH_STOP" '
+  UPDATED=$(echo "$EXISTING" | jq     --argjson dispatch_pre "$DISPATCH_PRE"     --argjson dispatch_post "$DISPATCH_POST"     --argjson shield_end "$SHIELD_SESSION_END"     --argjson dispatch_prompt "$DISPATCH_PROMPT"     --argjson dispatch_compact "$DISPATCH_COMPACT"     --argjson dispatch_resume "$DISPATCH_RESUME"     --argjson dispatch_stop "$DISPATCH_STOP" '
     .hooks = {
       PreToolUse: [$dispatch_pre],
-      PostToolUse: [$shield_post, $dispatch_task],
+      PostToolUse: [$dispatch_post],
       SessionEnd: [$shield_end],
       UserPromptSubmit: [$dispatch_prompt],
       PreCompact: [$dispatch_compact],

@@ -205,6 +205,33 @@ def handle_pretooluse_image_compress(data: dict) -> dict | None:
         return None
 
 
+def handle_pretooluse_image_original_req(data: dict) -> dict | None:
+    """If CC issued the sentinel bash command `redmem-original <path>`,
+    flag the next Read to serve the uncompressed original and deny the
+    bash call (which wasn't a real program anyway)."""
+    if data.get("tool_name") != "Bash":
+        return None
+    try:
+        from image_compressor import maybe_handle_bash_original_request
+        return maybe_handle_bash_original_request(data)
+    except Exception as e:
+        sys.stderr.write(f"[redmem] image-orig intercept error: {e}\n")
+        return None
+
+
+def handle_posttooluse_image_notice(data: dict) -> dict | None:
+    """Emit a PostToolUse additionalContext telling CC the image it just
+    read was auto-compressed, plus how to request the original."""
+    if data.get("tool_name") != "Read":
+        return None
+    try:
+        from image_compressor import maybe_notify_post_read
+        return maybe_notify_post_read(data)
+    except Exception as e:
+        sys.stderr.write(f"[redmem] image notice error: {e}\n")
+        return None
+
+
 def handle_stop(data: dict):
     """Emit Stop hook decision for autopilot (or allow stop)."""
     try:
@@ -298,6 +325,14 @@ def main():
                 print(json.dumps(shield_result))
             sys.exit(0)
 
+        # Image-original sentinel intercept (runs BEFORE autopilot bash
+        # guard — we want CC to be able to request originals even under
+        # autopilot, and the sentinel never actually executes a command).
+        orig_resp = handle_pretooluse_image_original_req(data)
+        if orig_resp:
+            print(json.dumps(orig_resp))
+            sys.exit(0)
+
         # Autopilot bash guard (only fires if session has active autopilot state).
         guard_resp = handle_pretooluse_bash_guard(data)
         if guard_resp:
@@ -315,13 +350,26 @@ def main():
             print(json.dumps(shield_result))
         sys.exit(0)
 
-    # ── PostToolUse: shield handles restore, then track tasks ──
+    # ── PostToolUse: shield restore, task tracking, image notice ──
     if event == "PostToolUse":
         tool_name = data.get("tool_name", "")
         shield_result = run_shield(raw_input)
 
         if tool_name in TASK_PLAN_TOOLS:
             handle_task_event(data)
+
+        # Image-compressed Read notice (additionalContext). Merge with
+        # any additionalContext shield may have produced.
+        img_notice = handle_posttooluse_image_notice(data)
+        if img_notice:
+            new_ctx = img_notice.get("hookSpecificOutput", {}).get("additionalContext", "")
+            if new_ctx:
+                shield_result.setdefault("hookSpecificOutput", {})
+                shield_result["hookSpecificOutput"]["hookEventName"] = "PostToolUse"
+                existing_ctx = shield_result["hookSpecificOutput"].get("additionalContext", "")
+                shield_result["hookSpecificOutput"]["additionalContext"] = (
+                    (existing_ctx + "\n\n" + new_ctx) if existing_ctx else new_ctx
+                )
 
         if shield_result:
             print(json.dumps(shield_result))

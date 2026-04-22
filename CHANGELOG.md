@@ -11,7 +11,8 @@ All notable changes to redmem will be documented in this file.
   - Uses macOS-native `sips` (no Python dependencies); fail-open on non-macOS or any tool error.
   - Cache: `/tmp/redmem-img-cache/<sha1>-<mtime>.<ext>` — mtime in filename ensures edits invalidate.
   - Three opt-out layers: `REDMEM_NO_IMAGE_COMPRESS=1` env (host-wide), `.redmem-no-compress` file (per-project), `.orig.` / `.nocompress.` filename marker (per-image).
-  - 27 tests (`test_image_compressor.py`) covering opt-outs, thresholds, cache invalidation, and a real-`sips` integration test (skipped where unavailable).
+  - **Automatic request-original flow**: after Claude reads a compressed image, a PostToolUse `additionalContext` tells it exactly how to get the uncompressed version if it needs pixel-level detail. Claude issues the sentinel bash command `redmem-original <path>`; a PreToolUse(Bash) hook intercepts it (the command is not a real program), writes a session-scoped flag, and denies. The next `Read <path>` in that session sees the flag and passes the original through uncompressed. No human renaming; the sentinel runs entirely in-hook.
+  - 36 tests (`test_image_compressor.py`) covering opt-outs, thresholds, cache invalidation, sentinel-bash intercept, flag one-shot + session scoping, PostToolUse notice sidecar logic, and a real-`sips` integration test (skipped where unavailable).
 - **Autopilot module** (`hooks/autopilot/`): overnight spec-driven loop that keeps Claude Code working unattended.
   - Three slash commands: `/autopilot [max_loop=150] <full-spec-path>`, `/autopilot-stop`, `/autopilot-status`.
   - Stop-hook re-injects a continuation message every turn until Claude emits `[[AUTOPILOT_DONE]]` or a halt condition trips (max_loop, 5-turn no-repo-change streak, 10h wall clock).
@@ -43,7 +44,7 @@ All notable changes to redmem will be documented in this file.
 - Renamed from claude-secret-shield to redmem (redact + memory)
 - Repository: github.com/tokligence/redmem
 - **Shield housekeeping moved from `.gitignore` to `.git/info/exclude`**: `.tmp_secrets.*` temp files are now registered in git's *local* exclude list at file-create time (previously appended to the user's shared `.gitignore` on first Read, which leaked into PRs and never fired if Claude didn't Read the file). Existing stray `.tmp_secrets.*` files in users' working trees can be safely deleted; the new behavior prevents recurrence.
-- **PreToolUse now routes through the dispatcher** instead of calling shield directly, so the autopilot bash guard can intercept destructive commands. Shield is still invoked as the first step inside the dispatcher (same semantics, one extra subprocess hop).
+- **PreToolUse and PostToolUse now route through the dispatcher** instead of calling shield directly, so the autopilot bash guard + image compressor + image notice can all share one gateway. Shield is still invoked as the first step inside the dispatcher (same semantics, one extra subprocess hop). `SHIELD_POST` direct entry removed; `DISPATCH_POST` covers the combined matcher `Read|Write|Edit|Bash|Todo*|Task*|Plan*`.
 - **install.sh prefers local files over curl** when run from a checked-out repo (`SCRIPT_DIR/hooks/...` / `SCRIPT_DIR/commands/...`). Earlier versions always fetched from GitHub main, which prevented installing a WIP branch locally.
 
 ## [Pre-rename] claude-secret-shield
